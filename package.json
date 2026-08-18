@@ -15,8 +15,9 @@
     "test:integration": "vitest run tests/integration",
     "test:security": "vitest run tests/security",
     "test:a11y": "vitest run tests/a11y",
-    "test:eval": "vitest run tests/evaluation",
-    "build": "electron-vite build"
+    "test:eval": "vitest run tests/evaluation/fixtures.test.ts",
+    "build": "electron-vite build",
+    "test:smoke": "electron . --smoke-test"
   },
   "dependencies": {
     "@paprv/contracts": "workspace:*",

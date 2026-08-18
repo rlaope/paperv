@@ -18,5 +18,6 @@ jobs:
       - run: pnpm test:integration
       - run: pnpm test:security
       - run: pnpm test:a11y
-      - run: pnpm test:eval -- --dataset tests/fixtures/evaluation/golden-papers.json
+      - run: pnpm test:eval
       - run: pnpm build
+      - run: pnpm test:smoke

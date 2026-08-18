@@ -38,4 +38,7 @@ export function installNavigationPolicy(window: Electron.BrowserWindow, initialU
   window.webContents.on('will-navigate', (event, targetUrl) => {
     if (!isAllowedNavigation(targetUrl, initialUrl)) event.preventDefault()
   })
+  window.webContents.on('will-redirect', (event, targetUrl, _isInPlace, isMainFrame) => {
+    if (isMainFrame && !isAllowedNavigation(targetUrl, initialUrl)) event.preventDefault()
+  })
 }
