@@ -29,12 +29,14 @@ const migrations: readonly Migration[] = [{
 }]
 
 const providerSettings = z.object({
-  provider: z.string().min(1),
+  provider: z.enum(['openai', 'anthropic', 'google', 'xai', 'ollama']),
   credentialRef: z.string().regex(
     /^keychain:paprv:[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
     'credentialRef must be a keychain:paprv UUID reference'
   )
 }).strict()
+
+export type ProviderId = z.infer<typeof providerSettings>['provider']
 
 export function validateMigrationVersions(versions: readonly number[]): void {
   for (let index = 0; index < versions.length; index += 1) {
@@ -70,6 +72,41 @@ function tableExists(db: Database, table: string): boolean {
   }
 }
 
+const expectedAppSettingsColumns = [
+  ['id', 'INTEGER', 0, 1],
+  ['provider', 'TEXT', 1, 0],
+  ['credential_ref', 'TEXT', 1, 0],
+  ['updated_at', 'TEXT', 1, 0]
+] as const
+
+function hasCanonicalAppSettingsSchema(db: Database): boolean {
+  const tableInfo = db.exec('PRAGMA table_info(app_settings)')[0]?.values ?? []
+  const columnsMatch = tableInfo.length === expectedAppSettingsColumns.length && tableInfo.every((row, index) => {
+    const expected = expectedAppSettingsColumns[index]
+    return expected !== undefined &&
+      row[1] === expected[0] &&
+      row[2] === expected[1] &&
+      row[3] === expected[2] &&
+      row[5] === expected[3]
+  })
+  if (!columnsMatch) return false
+
+  const statement = db.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'app_settings'")
+  try {
+    if (!statement.step()) return false
+    const sql = statement.get()[0]
+    if (typeof sql !== 'string') return false
+    const normalized = sql
+      .replace(/\s+/g, ' ')
+      .replace(/\s*([(),=])\s*/g, '$1')
+      .trim()
+      .toUpperCase()
+    return normalized === 'CREATE TABLE APP_SETTINGS(ID INTEGER PRIMARY KEY CHECK(ID=1),PROVIDER TEXT NOT NULL,CREDENTIAL_REF TEXT NOT NULL,UPDATED_AT TEXT NOT NULL)'
+  } finally {
+    statement.free()
+  }
+}
+
 function validateAppliedPrefix(db: Database): number[] {
   const applied = readAppliedVersions(db)
   if (
@@ -85,6 +122,9 @@ function validateAppliedPrefix(db: Database): number[] {
       if (tableExists(db, table) !== shouldExist) {
         throw new Error(`Database schema mismatch for migration ${migration.version}: table ${table}`)
       }
+    }
+    if (shouldExist && migration.version === 1 && !hasCanonicalAppSettingsSchema(db)) {
+      throw new Error('Database schema mismatch for migration 1: app_settings columns or constraints')
     }
   }
   return applied

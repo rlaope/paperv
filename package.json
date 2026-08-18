@@ -17,7 +17,7 @@
     "test:a11y": "vitest run tests/a11y",
     "test:eval": "vitest run tests/evaluation/fixtures.test.ts",
     "build": "electron-vite build",
-    "test:smoke": "electron . --smoke-test"
+    "test:smoke": "node scripts/electron-smoke.mjs"
   },
   "dependencies": {
     "@paprv/contracts": "workspace:*",

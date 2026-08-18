@@ -2,9 +2,12 @@ import { app, BrowserWindow, ipcMain } from 'electron'
 import { join } from 'node:path'
 import { ipcContracts } from '@paprv/contracts'
 import { createWindowOptions, installNavigationPolicy } from './window-policy'
+import { createSafeLogger } from './safe-logger'
 
 let mainWindow: BrowserWindow | null = null
 const smokeTest = process.argv.includes('--smoke-test')
+const smokeFailure = smokeTest ? process.env.PAPRV_SMOKE_FAILURE : undefined
+const logger = createSafeLogger((line) => process.stderr.write(`${line}\n`))
 
 function registerIpc(): void {
   ipcMain.handle(ipcContracts.systemGetInfo.channel, (_event, payload: unknown) => {
@@ -14,7 +17,9 @@ function registerIpc(): void {
 }
 
 async function createMainWindow(): Promise<void> {
-  const preload = join(__dirname, '../preload/index.js')
+  const preload = smokeFailure === 'preload'
+    ? join(__dirname, '../preload/missing.js')
+    : join(__dirname, '../preload/index.js')
   const window = new BrowserWindow(createWindowOptions(preload))
   mainWindow = window
   const developmentUrl = process.env.ELECTRON_RENDERER_URL
@@ -36,8 +41,8 @@ async function createMainWindow(): Promise<void> {
 }
 
 if (!app.requestSingleInstanceLock()) {
-  if (smokeTest) process.exitCode = 1
-  app.quit()
+  if (smokeTest) app.exit(1)
+  else app.quit()
 } else {
   app.on('second-instance', () => {
     if (mainWindow) {
@@ -46,16 +51,20 @@ if (!app.requestSingleInstanceLock()) {
     }
   })
   app.whenReady().then(async () => {
-    registerIpc()
+    if (smokeFailure === 'startup') throw new Error('injected startup failure')
+    if (smokeFailure !== 'ipc') registerIpc()
     await createMainWindow()
     app.on('activate', async () => {
       if (BrowserWindow.getAllWindows().length === 0) await createMainWindow()
     })
-  }).catch((error: unknown) => {
-    process.stderr.write(`Paprv startup failed: ${error instanceof Error ? error.message : 'unknown error'}
-`)
-    process.exitCode = 1
-    app.quit()
+  }).catch(() => {
+    logger.error('app.startup.failed', {
+      operation: 'app.startup',
+      errorCode: 'STARTUP_FAILURE',
+      outcome: 'failure',
+      retryable: false
+    })
+    app.exit(1)
   })
   app.on('window-all-closed', () => app.quit())
 }

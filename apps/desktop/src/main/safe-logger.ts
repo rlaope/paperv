@@ -1,49 +1,32 @@
-const secretPatterns = [
-  /\bsk-(?:ant-[a-z0-9_-]{12,}|proj-[a-z0-9_-]{12,}|[a-z0-9_-]{16,})\b/gi,
-  /\bAIza[a-z0-9_-]{20,}\b/gi,
-  /\bgh[pousr]_[a-z0-9_]{20,}\b/gi,
-  /\bgithub_pat_[a-z0-9_]{20,}\b/gi,
-  /\beyJ[a-z0-9_-]{8,}\.[a-z0-9_-]{8,}\.[a-z0-9_-]{8,}\b/gi,
-  /\bBearer\s+[a-z0-9._~+/=-]{8,}/gi
-]
+import { z } from 'zod'
 
-const allowedStringKeys = new Set(['event', 'provider', 'operation', 'outcome', 'errorCode'])
-const allowedNumberKeys = new Set(['durationMs', 'count'])
-const allowedBooleanKeys = new Set(['retryable'])
+const logEvent = z.enum(['app.startup.failed', 'provider.request.failed'])
+const safeContext = z.object({
+  provider: z.enum(['openai', 'anthropic', 'google', 'xai', 'ollama']).optional(),
+  operation: z.enum(['app.startup', 'provider.configure', 'provider.request']).optional(),
+  outcome: z.enum(['success', 'failure']).optional(),
+  errorCode: z.enum(['STARTUP_FAILURE', 'PROVIDER_UNAVAILABLE', 'IPC_FAILURE']).optional(),
+  durationMs: z.number().finite().nonnegative().optional(),
+  count: z.number().int().nonnegative().optional(),
+  retryable: z.boolean().optional()
+}).strict()
 
-function redactSecrets(value: string): string {
-  return secretPatterns.reduce((redacted, pattern) => redacted.replace(pattern, '[REDACTED]'), value)
-}
-
-function serializeContext(context: Record<string, unknown>): Record<string, string | number | boolean> {
-  const safe: Record<string, string | number | boolean> = {}
-  for (const [key, value] of Object.entries(context)) {
-    if (allowedStringKeys.has(key) && typeof value === 'string') {
-      safe[key] = redactSecrets(value).slice(0, 128)
-    } else if (allowedNumberKeys.has(key) && typeof value === 'number' && Number.isFinite(value)) {
-      safe[key] = value
-    } else if (allowedBooleanKeys.has(key) && typeof value === 'boolean') {
-      safe[key] = value
-    }
-  }
-  return safe
-}
+export type LogEvent = z.infer<typeof logEvent>
+export type SafeLogContext = z.infer<typeof safeContext>
 
 export interface SafeLogger {
-  info: (message: string, context?: Record<string, unknown>) => void
-  error: (message: string, context?: Record<string, unknown>) => void
+  info: (event: LogEvent, context?: SafeLogContext) => void
+  error: (event: LogEvent, context?: SafeLogContext) => void
 }
 
 export function createSafeLogger(write: (line: string) => void): SafeLogger {
-  const emit = (level: 'info' | 'error', message: string, context?: Record<string, unknown>): void => {
-    write(JSON.stringify({
-      level,
-      message: redactSecrets(message).slice(0, 512),
-      context: serializeContext(context ?? {})
-    }))
+  const emit = (level: 'info' | 'error', event: unknown, context?: unknown): void => {
+    const validatedEvent = logEvent.parse(event)
+    const validatedContext = safeContext.parse(context ?? {})
+    write(JSON.stringify({ level, event: validatedEvent, context: validatedContext }))
   }
   return {
-    info: (message, context) => emit('info', message, context),
-    error: (message, context) => emit('error', message, context)
+    info: (event, context) => emit('info', event, context),
+    error: (event, context) => emit('error', event, context)
   }
 }

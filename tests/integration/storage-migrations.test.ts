@@ -59,6 +59,44 @@ describe('SQLite migrations', () => {
     db.close()
   })
 
+  it('rejects an applied migration backed by an impostor app_settings schema', async () => {
+    const db = await createDatabase()
+    migrateDown(db)
+    db.run('CREATE TABLE app_settings(foo TEXT)')
+    db.run("INSERT INTO schema_migrations(version, applied_at) VALUES (1, 'impostor')")
+
+    expect(() => currentVersion(db)).toThrow(/schema mismatch/i)
+    db.close()
+  })
+
+  it('rejects drift in app_settings column constraints and id check', async () => {
+    const db = await createDatabase()
+    db.run('DROP TABLE app_settings')
+    db.run(`CREATE TABLE app_settings (
+      id INTEGER PRIMARY KEY,
+      provider TEXT,
+      credential_ref BLOB NOT NULL,
+      updated_at TEXT NOT NULL
+    )`)
+
+    expect(() => currentVersion(db)).toThrow(/schema mismatch/i)
+    db.close()
+  })
+
+  it('rejects canonical columns when the singleton id check is absent', async () => {
+    const db = await createDatabase()
+    db.run('DROP TABLE app_settings')
+    db.run(`CREATE TABLE app_settings (
+      id INTEGER PRIMARY KEY,
+      provider TEXT NOT NULL,
+      credential_ref TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    )`)
+
+    expect(() => currentVersion(db)).toThrow(/schema mismatch/i)
+    db.close()
+  })
+
   it('rolls back schema changes and the version row when a migration fails', async () => {
     const db = await createDatabase()
     migrateDown(db)

@@ -11,8 +11,11 @@ function providerSecrets(): string[] {
     `AIza${'A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q7r8'}`,
     `ghp_${'A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6'}`,
     `github_pat_${'A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q7r8'}`,
-    'eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJwYXBydiJ9.signature0123456789',
-    `Bearer ${'a1B2c3D4e5F6g7H8i9J0k1L2m3N4'}`
+    'eyJhbG...6789',
+    `Bearer ${'a1B2c3D4e5F6g7H8i9J0k1L2m3N4'}`,
+    '0123456789abcdef0123456789abcdef',
+    '0123456789abcdef'.repeat(4),
+    `xoxb-${'0123456789abcdef'.repeat(3)}`
   ]
 }
 
@@ -40,28 +43,49 @@ describe('API key containment', () => {
     db.close()
   })
 
-  it.each(providerSecrets())('removes provider secrets from message and context boundaries', (secret) => {
+  it.each(providerSecrets())('rejects a secret-shaped provider without persisting its bytes: %s', async (provider) => {
+    const db = await createDatabase()
+    const unsafeSave = saveProviderSettings as (database: typeof db, input: unknown) => void
+
+    expect(() => unsafeSave(db, { provider, credentialRef: opaqueCredentialRef })).toThrow()
+    expect(new TextDecoder().decode(db.export())).not.toContain(provider)
+    db.close()
+  })
+
+  it.each(providerSecrets())('rejects secrets at every logger string boundary before writing: %s', (secret) => {
+    const lines: string[] = []
+    const logger = createSafeLogger((line) => lines.push(line))
+    const unsafeError = logger.error as (event: unknown, context?: unknown) => void
+
+    expect(() => unsafeError(secret)).toThrow()
+    expect(() => unsafeError('provider.request.failed', { provider: secret })).toThrow()
+    expect(() => unsafeError('provider.request.failed', { operation: secret })).toThrow()
+    expect(() => unsafeError('provider.request.failed', { errorCode: secret })).toThrow()
+    expect(lines).toEqual([])
+  })
+
+  it('writes only a fixed event and validated scalar context', () => {
     const lines: string[] = []
     const logger = createSafeLogger((line) => lines.push(line))
 
-    logger.error(`provider request failed: ${secret}`, {
-      detail: secret,
-      provider: secret,
+    logger.error('provider.request.failed', {
+      provider: 'openai',
       operation: 'provider.configure',
-      nested: { value: secret },
-      items: [secret],
-      durationMs: 12
+      errorCode: 'PROVIDER_UNAVAILABLE',
+      durationMs: 12,
+      retryable: true
     })
 
-    const line = lines[0] ?? ''
-    expect(line).not.toContain(secret)
-    expect(line).toContain('[REDACTED]')
-    expect(JSON.parse(line)).toMatchObject({
+    expect(JSON.parse(lines[0] ?? '')).toEqual({
       level: 'error',
-      context: { operation: 'provider.configure', durationMs: 12 }
+      event: 'provider.request.failed',
+      context: {
+        provider: 'openai',
+        operation: 'provider.configure',
+        errorCode: 'PROVIDER_UNAVAILABLE',
+        durationMs: 12,
+        retryable: true
+      }
     })
-    expect(JSON.parse(line).context).not.toHaveProperty('detail')
-    expect(JSON.parse(line).context).not.toHaveProperty('nested')
-    expect(JSON.parse(line).context).not.toHaveProperty('items')
   })
 })
