@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { getPaper, importArxivPaper, listPapers, savePaperNote, type PaperDetail, type PaperListItem } from './api/papers'
 import { signalRuntimeSmokeReady, systemGetInfo, type SystemInfo } from './api/system'
-import { NoteWorkspace } from './features/editor/NoteWorkspace'
+import { NoteWorkspace, type NoteWorkspaceHandle } from './features/editor/NoteWorkspace'
 import { ImportPaperDialog } from './features/import/ImportPaperDialog'
 import type { EvidenceBacklink, WorkspacePapersApi } from './features/workspace/types'
 import { Icon } from './ui/Icon'
@@ -113,10 +113,12 @@ function Workspace({ onToggleTheme, papersApi, theme }: WorkspaceProps): React.J
   const [drawerAnnouncement, setDrawerAnnouncement] = useState('')
   const drawerReturnFocus = useRef<HTMLElement | null>(null)
   const [importOpen, setImportOpen] = useState(false)
+  const noteWorkspaceRef = useRef<NoteWorkspaceHandle>(null)
   const importReturnFocus = useRef<HTMLElement | null>(null)
   const handleBacklinksChange = useCallback((items: EvidenceBacklink[]) => setBacklinks(items), [])
 
-  const selectPaper = (arxivId: string): void => {
+  const selectPaper = async (arxivId: string): Promise<void> => {
+    if (!(await noteWorkspaceRef.current?.flushActiveDraft() ?? true)) return
     setSelectedEvidence(null)
     setBacklinks([])
     setDetail({ status: 'loading', arxivId })
@@ -126,7 +128,8 @@ function Workspace({ onToggleTheme, papersApi, theme }: WorkspaceProps): React.J
     )
     if (layout === 'compact') setDrawer(null)
   }
-  const closePaper = (): void => {
+  const closePaper = async (): Promise<void> => {
+    if (!(await noteWorkspaceRef.current?.flushActiveDraft() ?? true)) return
     setDetail({ status: 'idle' })
     setBacklinks([])
     setSelectedEvidence(null)
@@ -176,10 +179,13 @@ function Workspace({ onToggleTheme, papersApi, theme }: WorkspaceProps): React.J
     setImportOpen(false)
     window.setTimeout(() => importReturnFocus.current?.focus(), 0)
   }
-  const handleImported = (paper: PaperDetail): void => {
+  const handleFetched = (paper: PaperDetail): void => {
     setLibrary((current) => current.status !== 'ready'
       ? { status: 'ready', papers: [paper] }
       : { status: 'ready', papers: [paper, ...current.papers.filter((item) => item.arxivId !== paper.arxivId)] })
+  }
+  const openFetchedPaper = async (paper: PaperDetail): Promise<void> => {
+    if (!(await noteWorkspaceRef.current?.flushActiveDraft() ?? true)) return
     setDetail({ status: 'ready', paper })
     closeImport()
   }
@@ -296,7 +302,7 @@ function Workspace({ onToggleTheme, papersApi, theme }: WorkspaceProps): React.J
           : <div className="paper-list" role="listbox" aria-label="Paper list">
             {filteredPapers.map((paper, index) => <button type="button" role="option" aria-selected={selectedId === paper.arxivId}
               tabIndex={selectedId ? (selectedId === paper.arxivId ? 0 : -1) : (index === 0 ? 0 : -1)} className="paper-list-item" key={paper.arxivId}
-              onClick={() => selectPaper(paper.arxivId)}
+              onClick={() => { void selectPaper(paper.arxivId) }}
               onKeyDown={(event) => {
                 if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) return
                 event.preventDefault()
@@ -325,10 +331,10 @@ function Workspace({ onToggleTheme, papersApi, theme }: WorkspaceProps): React.J
             <div className="authors-property"><dt>Authors</dt><dd title={detail.paper.authors.join(', ') || '—'}>{detail.paper.authors.join(', ') || '—'}</dd></div>
           </dl>
         </> : detail.status === 'loading' ? <div className="property-skeleton" aria-label="Loading paper…"><span /><span /><span /></div>
-          : detail.status === 'error' ? <div className="paper-detail-error" role="alert"><strong>Paper could not be opened.</strong><span>{detail.arxivId}</span><button type="button" onClick={() => selectPaper(detail.arxivId)}>Try again</button></div>
+          : detail.status === 'error' ? <div className="paper-detail-error" role="alert"><strong>Paper could not be opened.</strong><span>{detail.arxivId}</span><button type="button" onClick={() => { void selectPaper(detail.arxivId) }}>Try again</button></div>
             : <h1>Paper Notes</h1>}
       </header>
-      <NoteWorkspace paper={currentPaper} papersApi={papersApi} onImport={openImport} onClosePaper={closePaper} onEvidenceSelect={selectEvidence} onBacklinksChange={handleBacklinksChange} />
+      <NoteWorkspace ref={noteWorkspaceRef} paper={currentPaper} papersApi={papersApi} onImport={openImport} onClosePaper={() => { void closePaper() }} onEvidenceSelect={selectEvidence} onBacklinksChange={handleBacklinksChange} />
     </main>
 
     <aside ref={evidenceRef} className={`evidence-pane${drawer === 'evidence' ? ' is-open' : ''}`} aria-label="Evidence and backlinks" role={layout !== 'wide' && drawer === 'evidence' ? 'dialog' : undefined} aria-modal={layout !== 'wide' && drawer === 'evidence' ? true : undefined} hidden={evidenceHidden}>
@@ -366,7 +372,7 @@ function Workspace({ onToggleTheme, papersApi, theme }: WorkspaceProps): React.J
 
     {drawer && layout !== 'wide' && <button className="drawer-scrim" type="button" aria-label="Close side panel" onClick={closeDrawer} />}
     <span className="visually-hidden" role="status">{drawerAnnouncement}</span>
-    <ImportPaperDialog open={importOpen} papersApi={papersApi} existingIds={new Set(library.status === 'ready' ? library.papers.map((paper) => paper.arxivId) : [])} onClose={closeImport} onImported={handleImported} />
+    <ImportPaperDialog open={importOpen} papersApi={papersApi} existingIds={new Set(library.status === 'ready' ? library.papers.map((paper) => paper.arxivId) : [])} onClose={closeImport} onFetched={handleFetched} onOpenPaper={openFetchedPaper} />
   </div>
 }
 

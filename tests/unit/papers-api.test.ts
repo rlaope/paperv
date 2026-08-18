@@ -61,6 +61,16 @@ describe('papers command client', () => {
     })
   })
 
+  it('validates the note limit in UTF-8 bytes for Korean text', async () => {
+    const allowed = '가'.repeat(87_381)
+    const tooLarge = '가'.repeat(87_382)
+    invokeMock.mockResolvedValue({ markdown: allowed, updatedAt: '2026-08-18T15:01:00.000Z' })
+
+    await expect(savePaperNote('1706.03762', allowed)).resolves.toMatchObject({ markdown: allowed })
+    await expect(savePaperNote('1706.03762', tooLarge)).rejects.toThrow()
+    expect(invokeMock).toHaveBeenCalledTimes(1)
+  })
+
   it.each([
     { ...listItem, arxivVersion: 0 },
     { ...listItem, publishedAt: 'not-a-date' },

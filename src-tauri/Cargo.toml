@@ -5,6 +5,7 @@ description = "Paprv secure desktop foundation"
 authors = ["Sionic AI"]
 edition = "2024"
 rust-version = "1.85"
+default-run = "paprv"
 
 [build-dependencies]
 tauri-build = { version = "2.6.3", features = [] }

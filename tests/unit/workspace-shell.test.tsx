@@ -155,6 +155,30 @@ describe('Paprv workspace shell', () => {
     expect(document.activeElement).toBe(evidenceToggle)
   })
 
+  it('adds a successfully fetched paper to the library even when the result is closed', async () => {
+    const api = createApi(); const host = renderApp(api)
+    await vi.waitFor(() => expect(host.textContent).toContain('No papers in your library yet.'))
+    click(namedButton(host, 'Fetch from arXiv'))
+    const dialog = await vi.waitFor(() => {
+      const match = host.querySelector('.import-dialog')
+      expect(match).not.toBeNull()
+      return match as HTMLElement
+    })
+    const input = dialog.querySelector('input[aria-label="arXiv URL or ID"]') as HTMLInputElement
+    enter(input, paper.arxivId)
+    click(namedButton(dialog, 'Fetch paper'))
+
+    await vi.waitFor(() => expect(dialog.textContent).toContain('Paper fetched from arXiv and added to your library.'))
+    click(namedButton(dialog, 'Close'))
+
+    await vi.waitFor(() => {
+      expect(host.querySelector('.import-dialog')).toBeNull()
+      expect(host.querySelector('[role="option"]')?.textContent).toContain(paper.title)
+    })
+    expect(host.querySelector('.active-document-tab')?.textContent).toContain('Welcome')
+    expect(api.getPaper).not.toHaveBeenCalled()
+  })
+
   it('labels arXiv acquisition as fetch rather than generic import and preserves the acknowledgement', async () => {
     const api = createApi(); const host = renderApp(api)
     await vi.waitFor(() => expect(host.querySelector('[aria-label="Fetch from arXiv"]')).not.toBeNull())

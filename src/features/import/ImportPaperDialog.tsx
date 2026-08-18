@@ -35,10 +35,11 @@ type Props = {
   papersApi: WorkspacePapersApi
   existingIds: ReadonlySet<string>
   onClose: () => void
-  onImported: (paper: PaperDetail) => void
+  onFetched: (paper: PaperDetail) => void
+  onOpenPaper: (paper: PaperDetail) => void
 }
 
-export function ImportPaperDialog({ existingIds, onClose, onImported, open, papersApi }: Props): React.JSX.Element | null {
+export function ImportPaperDialog({ existingIds, onClose, onFetched, onOpenPaper, open, papersApi }: Props): React.JSX.Element | null {
   const [input, setInput] = useState('')
   const [status, setStatus] = useState<ImportStatus>({ kind: 'idle' })
   const inputRef = useRef<HTMLInputElement>(null)
@@ -91,6 +92,7 @@ export function ImportPaperDialog({ existingIds, onClose, onImported, open, pape
     setStatus({ kind: 'loading' })
     try {
       const importedPaper = await papersApi.importArxivPaper(reference)
+      onFetched(importedPaper)
       setStatus({ kind: 'success', paper: importedPaper, duplicate: existingIds.has(importedPaper.arxivId) })
     } catch {
       setStatus({ kind: 'error', message: 'The paper could not be fetched from arXiv. Check your connection and try again.' })
@@ -119,7 +121,7 @@ export function ImportPaperDialog({ existingIds, onClose, onImported, open, pape
         <p>{status.duplicate ? 'Existing paper refreshed from arXiv.' : 'Paper fetched from arXiv and added to your library.'}</p>
         <div className="dialog-actions">
           <button type="button" onClick={onClose}>Close</button>
-          <button type="button" className="primary-button" onClick={() => onImported(status.paper)}>Open paper</button>
+          <button type="button" className="primary-button" onClick={() => onOpenPaper(status.paper)}>Open paper</button>
         </div>
       </div> : <form onSubmit={(event) => { void submit(event) }}>
         <label htmlFor={`${titleId}-reference`}>arXiv URL or ID</label>

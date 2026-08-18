@@ -41,6 +41,8 @@ const PAPERS_DDL: &str = r#"CREATE TABLE papers (
 )"#;
 const PAPERS_ORDER_INDEX_DDL: &str =
     "CREATE INDEX papers_order_idx ON papers(metadata_fetched_at DESC, arxiv_id ASC)";
+// SQLite length(TEXT) counts Unicode code points, not UTF-8 bytes. This unchanged
+// constraint is defense in depth; save_note is the authoritative byte boundary.
 const NOTES_DDL: &str = r#"CREATE TABLE notes (
   paper_arxiv_id TEXT PRIMARY KEY REFERENCES papers(arxiv_id) ON DELETE CASCADE,
   markdown TEXT NOT NULL CHECK (length(markdown) <= 262144),
@@ -304,7 +306,7 @@ pub fn upsert_paper(c: &mut Connection, metadata: &PaperMetadata) -> Result<(), 
     Ok(())
 }
 pub fn save_note(c: &mut Connection, id: &str, markdown: &str) -> Result<StoredNote, StorageError> {
-    if markdown.chars().count() > 262_144 {
+    if markdown.len() > 262_144 {
         return Err(StorageError::NotesDrift);
     }
     let tx = c.transaction()?;
@@ -508,6 +510,15 @@ mod tests {
         upsert_paper(&mut c, &sample_metadata()).unwrap();
         assert!(save_note(&mut c, "1706.03762", &"x".repeat(262_145)).is_err());
         assert!(c.execute("INSERT INTO notes VALUES('1706.03762',?1,'2026-01-01T00:00:00Z','2026-01-01T00:00:00Z')", [&"x".repeat(262_145)]).is_err());
+    }
+
+    #[test]
+    fn note_storage_boundary_rejects_non_ascii_over_utf8_byte_limit() {
+        let mut c = fresh();
+        migrate_up(&mut c).unwrap();
+        upsert_paper(&mut c, &sample_metadata()).unwrap();
+        assert!(save_note(&mut c, "1706.03762", &"가".repeat(87_381)).is_ok());
+        assert!(save_note(&mut c, "1706.03762", &"가".repeat(87_382)).is_err());
     }
 
     #[test]

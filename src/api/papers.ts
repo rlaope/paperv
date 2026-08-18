@@ -5,9 +5,13 @@ const rfc3339Schema = z.string().datetime({ offset: true })
 const canonicalArxivIdSchema = z.string().regex(
   /^(?:\d{4}\.\d{4,5}|[a-z0-9-]+(?:\.[A-Z]{2})?\/\d{7})$/
 )
+const noteMarkdownSchema = z.string().refine(
+  (markdown) => new TextEncoder().encode(markdown).byteLength <= 262_144,
+  'Note must be at most 262144 UTF-8 bytes'
+)
 
 export const paperNoteSchema = z.object({
-  markdown: z.string().max(262_144),
+  markdown: noteMarkdownSchema,
   updatedAt: rfc3339Schema
 }).strict()
 
@@ -34,7 +38,7 @@ const importArxivPaperInputSchema = z.object({
 }).strict()
 const savePaperNoteInputSchema = z.object({
   arxivId: canonicalArxivIdSchema,
-  markdown: z.string().max(262_144)
+  markdown: noteMarkdownSchema
 }).strict()
 
 export type PaperNote = z.infer<typeof paperNoteSchema>

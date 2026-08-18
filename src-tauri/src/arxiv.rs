@@ -686,22 +686,4 @@ mod tests {
         assert!(parse_metadata(long_title.as_bytes(), "1706.03762").is_err());
         assert!(parse_metadata(&vec![b'x'; MAX_RESPONSE_BYTES + 1], "1706.03762").is_err());
     }
-
-    #[test]
-    #[ignore = "bounded live arXiv probe; run manually, never in CI"]
-    fn live_imports_attention_metadata_into_a_temporary_database() {
-        let temp_path = std::env::temp_dir().join(format!(
-            "paprv-arxiv-probe-{}.sqlite3",
-            uuid::Uuid::new_v4()
-        ));
-        let id = ArxivId::parse_input("1706.03762").unwrap();
-        let metadata = ArxivApiClient::new().unwrap().fetch_metadata(&id).unwrap();
-        let mut connection = crate::storage::open_or_initialize(&temp_path).unwrap();
-        crate::storage::upsert_paper(&mut connection, &metadata).unwrap();
-        let stored = crate::storage::get_paper(&connection, id.base_id()).unwrap();
-        assert_eq!(stored.metadata.arxiv_id, "1706.03762");
-        assert_eq!(stored.metadata.title, "Attention Is All You Need");
-        drop(connection);
-        std::fs::remove_file(&temp_path).unwrap();
-    }
 }

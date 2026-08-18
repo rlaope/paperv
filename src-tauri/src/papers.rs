@@ -119,17 +119,31 @@ fn arxiv_error(error: ArxivApiError) -> CommandError {
     }
 }
 
+fn note_within_limit(markdown: &str) -> bool {
+    markdown.len() <= 262_144
+}
+
+async fn run_blocking<T, F>(task: F) -> Result<T, CommandError>
+where
+    T: Send + 'static,
+    F: FnOnce() -> Result<T, CommandError> + Send + 'static,
+{
+    tauri::async_runtime::spawn_blocking(task)
+        .await
+        .map_err(|_| CommandError::ArxivMetadataUnavailable)?
+}
+
 #[tauri::command]
-pub fn import_arxiv_paper(
+pub async fn import_arxiv_paper(
     input: ImportArxivPaperInput,
     state: State<'_, AppState>,
 ) -> Result<PaperDetail, CommandError> {
     let id =
         ArxivId::parse_input(&input.reference).map_err(|_| CommandError::InvalidArxivReference)?;
-    let metadata = state
-        .arxiv_client
-        .fetch_metadata(&id)
-        .map_err(arxiv_error)?;
+    let client = state.arxiv_client.clone();
+    let fetch_id = id.clone();
+    let metadata =
+        run_blocking(move || client.fetch_metadata(&fetch_id).map_err(arxiv_error)).await?;
     let mut connection = storage::open_connection(&state.database_path)
         .map_err(|_| CommandError::StorageUnavailable)?;
     storage::upsert_paper(&mut connection, &metadata).map_err(storage_error)?;
@@ -176,7 +190,7 @@ pub fn save_paper_note(
     input: SavePaperNoteInput,
     state: State<'_, AppState>,
 ) -> Result<PaperNote, CommandError> {
-    if input.markdown.chars().count() > 262_144 {
+    if !note_within_limit(&input.markdown) {
         return Err(CommandError::NoteTooLarge);
     }
     let id = ArxivId::parse_canonical_base(&input.arxiv_id)
@@ -218,6 +232,28 @@ mod tests {
             serde_json::to_value(detail).unwrap()["primaryCategory"],
             "cs.CL"
         );
+    }
+
+    #[test]
+    fn blocking_work_runs_off_the_async_executor() {
+        tauri::async_runtime::block_on(async {
+            let (release_tx, release_rx) = std::sync::mpsc::channel();
+            let blocking = tauri::async_runtime::spawn(run_blocking(move || {
+                release_rx.recv().unwrap();
+                Ok::<_, CommandError>(42)
+            }));
+            let responsive = tauri::async_runtime::spawn(async { 7 });
+
+            assert_eq!(responsive.await.unwrap(), 7);
+            release_tx.send(()).unwrap();
+            assert_eq!(blocking.await.unwrap().unwrap(), 42);
+        });
+    }
+
+    #[test]
+    fn note_limit_counts_utf8_bytes() {
+        assert!(note_within_limit(&"가".repeat(87_381)));
+        assert!(!note_within_limit(&"가".repeat(87_382)));
     }
 
     #[test]

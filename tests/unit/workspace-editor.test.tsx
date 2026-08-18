@@ -159,6 +159,50 @@ describe('Markdown workspace editor', () => {
     await vi.waitFor(() => expect(papersApi.savePaperNote).toHaveBeenCalledWith('1706.03762', 'newer draft'), { timeout: 1_200 })
   })
 
+  it('flushes an edited draft and waits for save completion before closing', async () => {
+    let resolveSave: ((note: PaperNote) => void) | undefined
+    const pending = new Promise<PaperNote>((resolve) => { resolveSave = resolve })
+    const papersApi = api(); papersApi.savePaperNote = vi.fn().mockReturnValue(pending)
+    const host = render(papersApi); const editor = await selectPaper(host)
+
+    enter(editor, 'close-safe draft')
+    click(namedButton(host, 'Close paper'))
+
+    await vi.waitFor(() => expect(papersApi.savePaperNote).toHaveBeenCalledWith('1706.03762', 'close-safe draft'))
+    expect(host.querySelector('.active-document-tab')?.textContent).toContain(detail.title)
+    resolveSave?.({ markdown: 'close-safe draft', updatedAt: '2026-08-18T07:00:00Z' })
+    await vi.waitFor(() => expect(host.querySelector('.active-document-tab')?.textContent).toContain('Welcome'))
+  })
+
+  it('flushes an edited draft and waits for save completion before switching papers', async () => {
+    const secondItem: PaperListItem = { ...listItem, arxivId: '2401.12345', title: 'Second Paper' }
+    const secondDetail: PaperDetail = { ...detail, ...secondItem, note: null }
+    let resolveSave: ((note: PaperNote) => void) | undefined
+    const pending = new Promise<PaperNote>((resolve) => { resolveSave = resolve })
+    const papersApi = api()
+    papersApi.listPapers = vi.fn().mockResolvedValue([listItem, secondItem])
+    papersApi.getPaper = vi.fn().mockImplementation(async (id) => id === secondItem.arxivId ? secondDetail : detail)
+    papersApi.savePaperNote = vi.fn().mockReturnValue(pending)
+    const host = render(papersApi); const editor = await selectPaper(host)
+
+    enter(editor, 'switch-safe draft')
+    const options = await vi.waitFor(() => {
+      const matches = [...host.querySelectorAll<HTMLElement>('[role="option"]')]
+      expect(matches).toHaveLength(2)
+      return matches
+    })
+    click(options[1]!)
+
+    await vi.waitFor(() => expect(papersApi.savePaperNote).toHaveBeenCalledWith('1706.03762', 'switch-safe draft'))
+    expect(host.querySelector('.active-document-tab')?.textContent).toContain(detail.title)
+    expect(papersApi.getPaper).not.toHaveBeenCalledWith(secondItem.arxivId)
+    resolveSave?.({ markdown: 'switch-safe draft', updatedAt: '2026-08-18T07:00:00Z' })
+    await vi.waitFor(() => {
+      expect(papersApi.getPaper).toHaveBeenCalledWith(secondItem.arxivId)
+      expect(host.querySelector('.active-document-tab')?.textContent).toContain(secondItem.title)
+    })
+  })
+
   it('keeps the draft and offers Retry save after failure', async () => {
     const saveMock = vi.fn().mockRejectedValueOnce(new Error('storage closed')).mockResolvedValueOnce({ markdown: 'recover me', updatedAt: '2026-08-18T07:00:00Z' })
     const papersApi = api(); papersApi.savePaperNote = saveMock

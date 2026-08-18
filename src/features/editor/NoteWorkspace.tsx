@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import type { PaperDetail } from '../../api/papers'
@@ -17,6 +17,10 @@ type Props = {
   onClosePaper: () => void
   onEvidenceSelect?: (evidenceId: string) => void
   onBacklinksChange?: (backlinks: EvidenceBacklink[]) => void
+}
+
+export type NoteWorkspaceHandle = {
+  flushActiveDraft: () => Promise<boolean>
 }
 
 const saveLabels: Record<SaveState, string> = {
@@ -52,9 +56,9 @@ function extractBacklinks(markdown: string): EvidenceBacklink[] {
   return backlinks
 }
 
-export function NoteWorkspace({
+export const NoteWorkspace = forwardRef<NoteWorkspaceHandle, Props>(function NoteWorkspace({
   onBacklinksChange, onClosePaper, onEvidenceSelect, onImport, paper, papersApi
-}: Props): React.JSX.Element {
+}, ref): React.JSX.Element {
   const [drafts, setDrafts] = useState<DraftMap>({})
   const [saveStates, setSaveStates] = useState<SaveMap>({})
   const [mode, setMode] = useState<Mode>('edit')
@@ -62,7 +66,10 @@ export function NoteWorkspace({
   const [composing, setComposing] = useState(false)
   const editorRef = useRef<HTMLTextAreaElement>(null)
   const latestDrafts = useRef<DraftMap>({})
+  const latestSaveStates = useRef<SaveMap>({})
   const requestIds = useRef<Record<string, number>>({})
+  const activeSaves = useRef<Record<string, Promise<boolean> | undefined>>({})
+  const composingRef = useRef(false)
 
   const paperId = paper?.arxivId ?? null
   const initialMarkdown = paper?.note?.markdown ?? ''
@@ -70,40 +77,78 @@ export function NoteWorkspace({
   const saveState = paperId ? (saveStates[paperId] ?? 'clean') : 'clean'
   const wordCount = draft.trim() ? draft.trim().split(/\s+/u).length : 0
 
+  if (paperId && latestDrafts.current[paperId] === undefined) {
+    latestDrafts.current[paperId] = initialMarkdown
+  }
+
+  const updateSaveState = (id: string, state: SaveState): void => {
+    latestSaveStates.current[id] = state
+    setSaveStates((states) => ({ ...states, [id]: state }))
+  }
+
   const updateDraft = (next: string): void => {
     if (!paperId) return
     latestDrafts.current[paperId] = next
     setDrafts((items) => ({ ...items, [paperId]: next }))
-    setSaveStates((states) => ({ ...states, [paperId]: 'dirty' }))
+    updateSaveState(paperId, 'dirty')
   }
 
-  const save = async (manual: boolean): Promise<void> => {
-    if (!paperId) return
+  const save = async (manual: boolean): Promise<boolean> => {
+    if (!paperId) return true
     const id = paperId
     const submittedDraft = latestDrafts.current[id] ?? draft
     const currentRequest = (requestIds.current[id] ?? 0) + 1
     requestIds.current[id] = currentRequest
-    setSaveStates((states) => ({ ...states, [id]: 'saving' }))
+    updateSaveState(id, 'saving')
     if (manual) setManualAnnouncement('Saving…')
-    try {
-      await papersApi.savePaperNote(id, submittedDraft)
-      if (requestIds.current[id] !== currentRequest) return
-      const currentDraft = latestDrafts.current[id] ?? submittedDraft
-      const nextState = currentDraft === submittedDraft ? 'saved' : 'dirty'
-      setSaveStates((states) => ({ ...states, [id]: nextState }))
-      if (manual) setManualAnnouncement(nextState === 'saved' ? 'Saved' : 'Newer changes remain unsaved')
-    } catch {
-      if (requestIds.current[id] !== currentRequest) return
-      const currentDraft = latestDrafts.current[id] ?? submittedDraft
-      if (currentDraft !== submittedDraft) {
-        setSaveStates((states) => ({ ...states, [id]: 'dirty' }))
-        if (manual) setManualAnnouncement('Newer changes remain unsaved')
-        return
+    const operation = (async (): Promise<boolean> => {
+      try {
+        await papersApi.savePaperNote(id, submittedDraft)
+        if (requestIds.current[id] !== currentRequest) return false
+        const currentDraft = latestDrafts.current[id] ?? submittedDraft
+        const nextState = currentDraft === submittedDraft ? 'saved' : 'dirty'
+        updateSaveState(id, nextState)
+        if (manual) setManualAnnouncement(nextState === 'saved' ? 'Saved' : 'Newer changes remain unsaved')
+        return nextState === 'saved'
+      } catch {
+        if (requestIds.current[id] !== currentRequest) return false
+        const currentDraft = latestDrafts.current[id] ?? submittedDraft
+        if (currentDraft !== submittedDraft) {
+          updateSaveState(id, 'dirty')
+          if (manual) setManualAnnouncement('Newer changes remain unsaved')
+          return false
+        }
+        updateSaveState(id, 'error')
+        if (manual) setManualAnnouncement('Save failed')
+        return false
       }
-      setSaveStates((states) => ({ ...states, [id]: 'error' }))
-      if (manual) setManualAnnouncement('Save failed')
-    }
+    })()
+    activeSaves.current[id] = operation
+    const saved = await operation
+    if (activeSaves.current[id] === operation) delete activeSaves.current[id]
+    return saved
   }
+
+  useImperativeHandle(ref, () => ({
+    flushActiveDraft: async () => {
+      if (!paperId) return true
+      if (composingRef.current) return false
+      const id = paperId
+      while (true) {
+        const active = activeSaves.current[id]
+        if (active) await active
+        const state = latestSaveStates.current[id] ?? 'clean'
+        if (state === 'clean' || state === 'saved') return true
+        if (state === 'error') return false
+        if (state === 'dirty') {
+          if (await save(false)) return true
+          if ((latestSaveStates.current[id] ?? 'clean') === 'error') return false
+          continue
+        }
+        return false
+      }
+    }
+  }))
 
   useEffect(() => {
     if (!paperId || saveState !== 'dirty' || composing) return
@@ -187,8 +232,8 @@ export function NoteWorkspace({
         spellCheck="false"
         value={draft}
         onChange={(event) => updateDraft(event.target.value)}
-        onCompositionStart={() => setComposing(true)}
-        onCompositionEnd={() => setComposing(false)}
+        onCompositionStart={() => { composingRef.current = true; setComposing(true) }}
+        onCompositionEnd={() => { composingRef.current = false; setComposing(false) }}
         onKeyDown={(event) => {
           if ((event.metaKey || event.ctrlKey) && event.key.toLocaleLowerCase() === 's') {
             event.preventDefault()
@@ -224,4 +269,4 @@ export function NoteWorkspace({
       <span className="visually-hidden" role="status">{manualAnnouncement}</span>
     </footer>
   </>
-}
+})
