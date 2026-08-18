@@ -7,6 +7,9 @@ pub enum LogEvent {
     AppStartupFailed,
     StorageMigrationFailed,
     ProviderRequestFailed,
+    ArxivMetadataRejected,
+    ArxivPaperImported,
+    PaperNoteSaved,
 }
 
 #[derive(Debug, Clone, Copy, Serialize)]
@@ -16,6 +19,7 @@ pub enum ErrorCode {
     DatabaseUnavailable,
     MigrationRejected,
     ProviderUnavailable,
+    ArxivUnavailable,
 }
 
 #[derive(Debug, Clone, Copy, Serialize)]
@@ -78,5 +82,21 @@ mod tests {
             r#"{"event":"provider_request_failed","context":{"error_code":"provider_unavailable","provider":"openai","attempt":2}}
 "#
         );
+    }
+
+    #[test]
+    fn arxiv_and_paper_events_are_fixed_schema_values() {
+        for (event, expected) in [
+            (LogEvent::ArxivMetadataRejected, "arxiv_metadata_rejected"),
+            (LogEvent::ArxivPaperImported, "arxiv_paper_imported"),
+            (LogEvent::PaperNoteSaved, "paper_note_saved"),
+        ] {
+            let mut output = Vec::new();
+            write_event(&mut output, event, LogContext::default()).unwrap();
+            assert_eq!(
+                String::from_utf8(output).unwrap(),
+                format!("{{\"event\":\"{expected}\",\"context\":{{}}}}\n")
+            );
+        }
     }
 }

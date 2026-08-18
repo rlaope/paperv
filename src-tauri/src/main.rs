@@ -26,7 +26,8 @@ fn main() {
             );
             io::Error::other("application data directory unavailable")
         })?;
-        paprv::storage::open_or_initialize(&app_data.join("paprv.sqlite3")).map_err(|_| {
+        let database_path = app_data.join("paprv.sqlite3");
+        paprv::storage::open_or_initialize(&database_path).map_err(|_| {
             stderr_event(
                 LogEvent::StorageMigrationFailed,
                 LogContext {
@@ -36,6 +37,20 @@ fn main() {
             );
             io::Error::other("database initialization rejected")
         })?;
+        let arxiv_client = paprv::arxiv::ArxivApiClient::new().map_err(|_| {
+            stderr_event(
+                LogEvent::AppStartupFailed,
+                LogContext {
+                    error_code: Some(ErrorCode::ArxivUnavailable),
+                    ..LogContext::default()
+                },
+            );
+            io::Error::other("arxiv client initialization unavailable")
+        })?;
+        app.manage(paprv::papers::AppState {
+            database_path,
+            arxiv_client,
+        });
         let window_config = app
             .config()
             .app
@@ -54,10 +69,20 @@ fn main() {
     #[cfg(debug_assertions)]
     let builder = builder.invoke_handler(tauri::generate_handler![
         paprv::system::system_get_info,
-        paprv::system::runtime_smoke_ready
+        paprv::system::runtime_smoke_ready,
+        paprv::papers::import_arxiv_paper,
+        paprv::papers::list_papers,
+        paprv::papers::get_paper,
+        paprv::papers::save_paper_note,
     ]);
     #[cfg(not(debug_assertions))]
-    let builder = builder.invoke_handler(tauri::generate_handler![paprv::system::system_get_info]);
+    let builder = builder.invoke_handler(tauri::generate_handler![
+        paprv::system::system_get_info,
+        paprv::papers::import_arxiv_paper,
+        paprv::papers::list_papers,
+        paprv::papers::get_paper,
+        paprv::papers::save_paper_note,
+    ]);
 
     builder
         .run(tauri::generate_context!())
