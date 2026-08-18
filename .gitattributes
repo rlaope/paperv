@@ -1,4 +1,4 @@
 # GitHub Linguist: count only Rust in repository language statistics.
-# Other source files remain versioned and browsable.
-* linguist-detectable=false
-*.rs linguist-detectable=true
+# Other source files remain versioned and browsable, but are treated as vendored.
+* linguist-detectable=false linguist-vendored
+*.rs linguist-detectable=true -linguist-vendored
