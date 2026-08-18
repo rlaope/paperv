@@ -13,8 +13,11 @@ const logger = createSafeLogger((line) => process.stderr.write(`${line}\n`))
 const smokeFailureExitCodes = {
   startup: 41,
   preload: 42,
-  ipc: 43
+  ipc: 43,
+  renderer: 44
 } as const
+
+class RendererReadinessError extends Error {}
 
 function configureSmokeUserData(): boolean {
   if (!smokeTest) return true
@@ -41,8 +44,32 @@ function configureSmokeUserData(): boolean {
 function smokeExitCode(): number {
   if (smokeFailure === 'preload') return smokeFailureExitCodes.preload
   if (smokeFailure === 'ipc') return smokeFailureExitCodes.ipc
+  if (smokeFailure === 'renderer') return smokeFailureExitCodes.renderer
   if (smokeFailure !== undefined) return smokeFailureExitCodes.startup
   return 1
+}
+
+async function waitForRendererReadiness(window: BrowserWindow): Promise<unknown> {
+  try {
+    return await window.webContents.executeJavaScript(`
+      new Promise((resolve, reject) => {
+        const deadline = Date.now() + 5000
+        const inspect = () => {
+          const marker = {
+            ready: document.documentElement.dataset.paprvReady,
+            platform: document.documentElement.dataset.paprvPlatform,
+            version: document.documentElement.dataset.paprvVersion
+          }
+          if (marker.ready === 'true') resolve(marker)
+          else if (Date.now() >= deadline) reject(new Error('renderer readiness timeout'))
+          else setTimeout(inspect, 25)
+        }
+        inspect()
+      })
+    `)
+  } catch (error) {
+    throw new RendererReadinessError('Packaged renderer did not become ready', { cause: error })
+  }
 }
 
 function registerIpc(): void {
@@ -66,10 +93,36 @@ async function createMainWindow(): Promise<void> {
   })
   window.on('closed', () => { mainWindow = null })
   if (developmentUrl) await window.loadURL(developmentUrl)
-  else await window.loadFile(join(__dirname, '../renderer/index.html'))
+  else {
+    const rendererFile = smokeFailure === 'renderer' ? 'missing-renderer.html' : 'index.html'
+    try {
+      await window.loadFile(join(__dirname, `../renderer/${rendererFile}`))
+    } catch (error) {
+      if (smokeTest) throw new RendererReadinessError('Packaged renderer failed to load', { cause: error })
+      throw error
+    }
+  }
   if (smokeTest) {
+    const marker = await waitForRendererReadiness(window) as {
+      ready?: unknown
+      platform?: unknown
+      version?: unknown
+    }
+    if (marker.ready !== 'true') throw new RendererReadinessError('Renderer readiness marker is invalid')
+    let markerInfo
+    try {
+      markerInfo = ipcContracts.systemGetInfo.response.parse({
+        platform: marker.platform,
+        version: marker.version
+      })
+    } catch (error) {
+      throw new RendererReadinessError('Renderer readiness marker data is invalid', { cause: error })
+    }
     const response: unknown = await window.webContents.executeJavaScript('window.paprv.system.getInfo()')
     const info = ipcContracts.systemGetInfo.response.parse(response)
+    if (markerInfo.platform !== info.platform || markerInfo.version !== info.version) {
+      throw new RendererReadinessError('Renderer readiness marker does not match startup IPC')
+    }
     process.stdout.write(`Paprv Electron smoke passed: ${info.platform} ${info.version}\n`)
     window.destroy()
     app.quit()
@@ -98,14 +151,19 @@ if (!configureSmokeUserData()) {
     app.on('activate', async () => {
       if (BrowserWindow.getAllWindows().length === 0) await createMainWindow()
     })
-  }).catch(() => {
+  }).catch((error: unknown) => {
     logger.error('app.startup.failed', {
       operation: 'app.startup',
       errorCode: 'STARTUP_FAILURE',
       outcome: 'failure',
       retryable: false
     })
-    app.exit(smokeTest ? smokeExitCode() : 1)
+    const exitCode = smokeFailure !== undefined
+      ? smokeExitCode()
+      : error instanceof RendererReadinessError
+        ? smokeFailureExitCodes.renderer
+        : 1
+    app.exit(smokeTest ? exitCode : 1)
   })
   app.on('window-all-closed', () => app.quit())
 }
