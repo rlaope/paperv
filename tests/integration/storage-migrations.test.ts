@@ -52,6 +52,36 @@ describe('SQLite migrations', () => {
     db.close()
   })
 
+  it.each([
+    {
+      name: 'extra column',
+      ddl: 'CREATE TABLE schema_migrations (version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL, extra TEXT)'
+    },
+    {
+      name: 'missing version primary key',
+      ddl: 'CREATE TABLE schema_migrations (version INTEGER NOT NULL, applied_at TEXT NOT NULL)'
+    },
+    {
+      name: 'nullable applied_at',
+      ddl: 'CREATE TABLE schema_migrations (version INTEGER PRIMARY KEY, applied_at TEXT)'
+    },
+    {
+      name: 'impostor types',
+      ddl: 'CREATE TABLE schema_migrations (version TEXT PRIMARY KEY, applied_at BLOB NOT NULL)'
+    },
+    {
+      name: 'impostor ledger constraint',
+      ddl: 'CREATE TABLE schema_migrations (version INTEGER PRIMARY KEY CHECK (version > 0), applied_at TEXT NOT NULL)'
+    }
+  ])('rejects a non-canonical schema_migrations ledger: $name', async ({ ddl }) => {
+    const db = await createDatabase()
+    db.run('DROP TABLE schema_migrations')
+    db.run(ddl)
+
+    expect(() => currentVersion(db)).toThrow(/schema_migrations schema mismatch/i)
+    db.close()
+  })
+
   it('rejects a version row when its required table is absent', async () => {
     const db = await createDatabase()
     db.run('DROP TABLE app_settings')

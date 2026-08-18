@@ -1,5 +1,6 @@
 import { app, BrowserWindow, ipcMain } from 'electron'
-import { join } from 'node:path'
+import { tmpdir } from 'node:os'
+import { basename, dirname, isAbsolute, join, resolve } from 'node:path'
 import { ipcContracts } from '@paprv/contracts'
 import { createWindowOptions, installNavigationPolicy } from './window-policy'
 import { createSafeLogger } from './safe-logger'
@@ -8,6 +9,41 @@ let mainWindow: BrowserWindow | null = null
 const smokeTest = process.argv.includes('--smoke-test')
 const smokeFailure = smokeTest ? process.env.PAPRV_SMOKE_FAILURE : undefined
 const logger = createSafeLogger((line) => process.stderr.write(`${line}\n`))
+
+const smokeFailureExitCodes = {
+  startup: 41,
+  preload: 42,
+  ipc: 43
+} as const
+
+function configureSmokeUserData(): boolean {
+  if (!smokeTest) return true
+  const candidate = process.env.PAPRV_SMOKE_USER_DATA
+  if (
+    candidate === undefined ||
+    !isAbsolute(candidate) ||
+    dirname(resolve(candidate)) !== resolve(tmpdir()) ||
+    !/^paprv-smoke-[A-Za-z0-9]+$/.test(basename(candidate))
+  ) {
+    logger.error('app.startup.failed', {
+      operation: 'app.startup',
+      errorCode: 'STARTUP_FAILURE',
+      outcome: 'failure',
+      retryable: false
+    })
+    app.exit(smokeFailureExitCodes.startup)
+    return false
+  }
+  app.setPath('userData', candidate)
+  return true
+}
+
+function smokeExitCode(): number {
+  if (smokeFailure === 'preload') return smokeFailureExitCodes.preload
+  if (smokeFailure === 'ipc') return smokeFailureExitCodes.ipc
+  if (smokeFailure !== undefined) return smokeFailureExitCodes.startup
+  return 1
+}
 
 function registerIpc(): void {
   ipcMain.handle(ipcContracts.systemGetInfo.channel, (_event, payload: unknown) => {
@@ -22,7 +58,7 @@ async function createMainWindow(): Promise<void> {
     : join(__dirname, '../preload/index.js')
   const window = new BrowserWindow(createWindowOptions(preload))
   mainWindow = window
-  const developmentUrl = process.env.ELECTRON_RENDERER_URL
+  const developmentUrl = smokeTest ? undefined : process.env.ELECTRON_RENDERER_URL
   const initialUrl = developmentUrl ?? new URL('../renderer/index.html', `file://${__dirname}/`).href
   installNavigationPolicy(window, initialUrl)
   window.once('ready-to-show', () => {
@@ -40,7 +76,9 @@ async function createMainWindow(): Promise<void> {
   }
 }
 
-if (!app.requestSingleInstanceLock()) {
+if (!configureSmokeUserData()) {
+  // Invalid smoke configuration exits before acquiring a shared lock.
+} else if (!app.requestSingleInstanceLock()) {
   if (smokeTest) app.exit(1)
   else app.quit()
 } else {
@@ -52,6 +90,9 @@ if (!app.requestSingleInstanceLock()) {
   })
   app.whenReady().then(async () => {
     if (smokeFailure === 'startup') throw new Error('injected startup failure')
+    if (smokeFailure !== undefined && !Object.hasOwn(smokeFailureExitCodes, smokeFailure)) {
+      throw new Error('unknown injected smoke failure')
+    }
     if (smokeFailure !== 'ipc') registerIpc()
     await createMainWindow()
     app.on('activate', async () => {
@@ -64,7 +105,7 @@ if (!app.requestSingleInstanceLock()) {
       outcome: 'failure',
       retryable: false
     })
-    app.exit(1)
+    app.exit(smokeTest ? smokeExitCode() : 1)
   })
   app.on('window-all-closed', () => app.quit())
 }

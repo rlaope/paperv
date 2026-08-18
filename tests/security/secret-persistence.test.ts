@@ -52,6 +52,23 @@ describe('API key containment', () => {
     db.close()
   })
 
+  it.each([
+    { provider: 'secret-provider', credentialRef: opaqueCredentialRef },
+    { provider: 'openai', credentialRef: 'keychain:paprv:550e8400-e29b-41d4-a716-44665544000g' },
+    { provider: 'openai', credentialRef: 'keychain:paprv:550e8400e29b41d4a716446655440000' },
+    { provider: 'openai', credentialRef: 'keychain:paprv:550e8400-e29b-61d4-a716-446655440000' },
+    { provider: 'openai', credentialRef: 'keychain:paprv:550e8400-e29b-41d4-c716-446655440000' }
+  ])('enforces provider and credential reference invariants in SQLite: $provider $credentialRef', async ({ provider, credentialRef }) => {
+    const db = await createDatabase()
+
+    expect(() => db.run(
+      'INSERT INTO app_settings(id, provider, credential_ref, updated_at) VALUES (1, ?, ?, ?)',
+      [provider, credentialRef, new Date(0).toISOString()]
+    )).toThrow()
+    expect(db.exec('SELECT provider, credential_ref FROM app_settings')).toEqual([])
+    db.close()
+  })
+
   it.each(providerSecrets())('rejects secrets at every logger string boundary before writing: %s', (secret) => {
     const lines: string[] = []
     const logger = createSafeLogger((line) => lines.push(line))

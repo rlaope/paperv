@@ -14,16 +14,39 @@ interface Migration {
   requiredTables: readonly string[]
 }
 
+const appSettingsDdl = `
+  CREATE TABLE app_settings (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    provider TEXT NOT NULL CHECK (provider IN ('openai', 'anthropic', 'google', 'xai', 'ollama')),
+    credential_ref TEXT NOT NULL CHECK (
+      length(credential_ref) = 51 AND
+      substr(credential_ref, 1, 15) = 'keychain:paprv:' AND
+      substr(credential_ref, 16, 8) NOT GLOB '*[^0-9a-f]*' AND
+      substr(credential_ref, 24, 1) = '-' AND
+      substr(credential_ref, 25, 4) NOT GLOB '*[^0-9a-f]*' AND
+      substr(credential_ref, 29, 1) = '-' AND
+      substr(credential_ref, 30, 1) IN ('1', '2', '3', '4', '5') AND
+      substr(credential_ref, 30, 4) NOT GLOB '*[^0-9a-f]*' AND
+      substr(credential_ref, 34, 1) = '-' AND
+      substr(credential_ref, 35, 1) IN ('8', '9', 'a', 'b') AND
+      substr(credential_ref, 35, 4) NOT GLOB '*[^0-9a-f]*' AND
+      substr(credential_ref, 39, 1) = '-' AND
+      substr(credential_ref, 40, 12) NOT GLOB '*[^0-9a-f]*'
+    ),
+    updated_at TEXT NOT NULL
+  );
+`
+
+const schemaMigrationsDdl = `
+  CREATE TABLE schema_migrations (
+    version INTEGER PRIMARY KEY,
+    applied_at TEXT NOT NULL
+  );
+`
+
 const migrations: readonly Migration[] = [{
   version: 1,
-  up: `
-    CREATE TABLE app_settings (
-      id INTEGER PRIMARY KEY CHECK (id = 1),
-      provider TEXT NOT NULL,
-      credential_ref TEXT NOT NULL,
-      updated_at TEXT NOT NULL
-    );
-  `,
+  up: appSettingsDdl,
   down: 'DROP TABLE app_settings;',
   requiredTables: ['app_settings']
 }]
@@ -51,10 +74,10 @@ function validateMigrationList(): void {
 }
 
 function ensureMigrationTable(db: Database): void {
-  db.run(`CREATE TABLE IF NOT EXISTS schema_migrations (
-    version INTEGER PRIMARY KEY,
-    applied_at TEXT NOT NULL
-  )`)
+  if (!tableExists(db, 'schema_migrations')) db.run(schemaMigrationsDdl)
+  if (!hasCanonicalTableSchema(db, 'schema_migrations', expectedSchemaMigrationsColumns, schemaMigrationsDdl)) {
+    throw new Error('Database schema_migrations schema mismatch: columns or constraints')
+  }
 }
 
 function readAppliedVersions(db: Database): number[] {
@@ -79,10 +102,30 @@ const expectedAppSettingsColumns = [
   ['updated_at', 'TEXT', 1, 0]
 ] as const
 
-function hasCanonicalAppSettingsSchema(db: Database): boolean {
-  const tableInfo = db.exec('PRAGMA table_info(app_settings)')[0]?.values ?? []
-  const columnsMatch = tableInfo.length === expectedAppSettingsColumns.length && tableInfo.every((row, index) => {
-    const expected = expectedAppSettingsColumns[index]
+const expectedSchemaMigrationsColumns = [
+  ['version', 'INTEGER', 0, 1],
+  ['applied_at', 'TEXT', 1, 0]
+] as const
+
+type ExpectedColumn = readonly [name: string, type: string, notNull: number, primaryKey: number]
+
+function normalizeCreateTableSql(sql: string): string {
+  return sql
+    .replace(/\s+/g, ' ')
+    .replace(/\s*([(),=])\s*/g, '$1')
+    .trim()
+    .replace(/;$/, '')
+}
+
+function hasCanonicalTableSchema(
+  db: Database,
+  table: string,
+  expectedColumns: readonly ExpectedColumn[],
+  expectedDdl: string
+): boolean {
+  const tableInfo = db.exec(`PRAGMA table_info(${table})`)[0]?.values ?? []
+  const columnsMatch = tableInfo.length === expectedColumns.length && tableInfo.every((row, index) => {
+    const expected = expectedColumns[index]
     return expected !== undefined &&
       row[1] === expected[0] &&
       row[2] === expected[1] &&
@@ -91,20 +134,19 @@ function hasCanonicalAppSettingsSchema(db: Database): boolean {
   })
   if (!columnsMatch) return false
 
-  const statement = db.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'app_settings'")
+  const statement = db.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?")
   try {
+    statement.bind([table])
     if (!statement.step()) return false
     const sql = statement.get()[0]
-    if (typeof sql !== 'string') return false
-    const normalized = sql
-      .replace(/\s+/g, ' ')
-      .replace(/\s*([(),=])\s*/g, '$1')
-      .trim()
-      .toUpperCase()
-    return normalized === 'CREATE TABLE APP_SETTINGS(ID INTEGER PRIMARY KEY CHECK(ID=1),PROVIDER TEXT NOT NULL,CREDENTIAL_REF TEXT NOT NULL,UPDATED_AT TEXT NOT NULL)'
+    return typeof sql === 'string' && normalizeCreateTableSql(sql) === normalizeCreateTableSql(expectedDdl)
   } finally {
     statement.free()
   }
+}
+
+function hasCanonicalAppSettingsSchema(db: Database): boolean {
+  return hasCanonicalTableSchema(db, 'app_settings', expectedAppSettingsColumns, appSettingsDdl)
 }
 
 function validateAppliedPrefix(db: Database): number[] {
