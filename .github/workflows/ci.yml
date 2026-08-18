@@ -29,3 +29,5 @@ jobs:
       - run: cargo test --manifest-path src-tauri/Cargo.toml --all-features
       - run: pnpm tauri build --debug
       - run: pnpm test:runtime
+      - run: pnpm test:runtime:concurrent
+      - run: pnpm test:release-smoke-gate

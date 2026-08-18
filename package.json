@@ -14,6 +14,8 @@
     "test:a11y": "vitest run tests/a11y",
     "test:eval": "vitest run tests/evaluation/fixtures.test.ts",
     "test:runtime": "node scripts/tauri-runtime-smoke.mjs",
+    "test:runtime:concurrent": "node scripts/tauri-runtime-smoke-concurrent.mjs",
+    "test:release-smoke-gate": "cargo build --release --manifest-path src-tauri/Cargo.toml --bin paprv && node scripts/verify-release-smoke-gate.mjs",
     "build": "vite build"
   },
   "dependencies": {
