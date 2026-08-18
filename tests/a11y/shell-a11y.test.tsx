@@ -2,11 +2,12 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createRoot } from 'react-dom/client'
 import axe from 'axe-core'
-import { systemGetInfo } from '../../src/api/system'
+import { signalRuntimeSmokeReady, systemGetInfo } from '../../src/api/system'
 import { App } from '../../src/App'
 
-vi.mock('../../src/api/system', () => ({ systemGetInfo: vi.fn() }))
+vi.mock('../../src/api/system', () => ({ systemGetInfo: vi.fn(), signalRuntimeSmokeReady: vi.fn() }))
 vi.mocked(systemGetInfo).mockResolvedValue({ platform: 'macos', version: '0.0.1' })
+vi.mocked(signalRuntimeSmokeReady).mockResolvedValue(false)
 afterEach(() => { document.body.innerHTML = '' })
 
 describe('desktop shell accessibility', () => {

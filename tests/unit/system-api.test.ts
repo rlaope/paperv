@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { invoke } from '@tauri-apps/api/core'
-import { systemGetInfo } from '../../src/api/system'
+import { signalRuntimeSmokeReady, systemGetInfo } from '../../src/api/system'
 
 vi.mock('@tauri-apps/api/core', () => ({ invoke: vi.fn() }))
 const invokeMock = vi.mocked(invoke)
@@ -21,5 +21,13 @@ describe('system command client', () => {
   ])('rejects malformed backend output: %j', async (output) => {
     invokeMock.mockResolvedValue(output)
     await expect(systemGetInfo()).rejects.toThrow()
+  })
+
+  it('signals runtime readiness with only the validated renderer marker', async () => {
+    invokeMock.mockResolvedValue(true)
+    await expect(signalRuntimeSmokeReady({ platform: 'macos', version: '0.0.1' })).resolves.toBe(true)
+    expect(invokeMock).toHaveBeenCalledWith('runtime_smoke_ready', {
+      marker: 'PAPRV_RENDERER_READY:macos:0.0.1'
+    })
   })
 })

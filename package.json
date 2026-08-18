@@ -13,6 +13,7 @@
     "test": "vitest run tests/unit",
     "test:a11y": "vitest run tests/a11y",
     "test:eval": "vitest run tests/evaluation/fixtures.test.ts",
+    "test:runtime": "node scripts/tauri-runtime-smoke.mjs",
     "build": "vite build"
   },
   "dependencies": {

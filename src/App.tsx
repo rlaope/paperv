@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { systemGetInfo, type SystemInfo } from './api/system'
+import { signalRuntimeSmokeReady, systemGetInfo, type SystemInfo } from './api/system'
 
 type StartupState = { status: 'loading' } | { status: 'ready'; info: SystemInfo } | { status: 'error' }
 const readinessKeys = ['paprvReady', 'paprvPlatform', 'paprvVersion'] as const
@@ -26,6 +26,7 @@ export function App(): React.JSX.Element {
     document.documentElement.dataset.paprvPlatform = startup.info.platform
     document.documentElement.dataset.paprvVersion = startup.info.version
     document.documentElement.dataset.paprvReady = 'true'
+    void signalRuntimeSmokeReady(startup.info).catch(() => undefined)
     return clearReadiness
   }, [startup])
 
@@ -35,7 +36,10 @@ export function App(): React.JSX.Element {
       <h1>논문을 근거와 함께 배우는 작업 공간</h1>
       <p>안전한 데스크톱 기반이 준비되었습니다. 논문 가져오기와 AI 기능은 다음 마일스톤에서 활성화됩니다.</p>
       {startup.status === 'loading' && <p aria-live="polite">시작 정보를 확인하고 있습니다.</p>}
-      {startup.status === 'ready' && <p aria-live="polite">실행 환경: {startup.info.platform} · 버전 {startup.info.version}</p>}
+      {startup.status === 'ready' && <>
+        <p aria-live="polite">실행 환경: {startup.info.platform} · 버전 {startup.info.version}</p>
+        <output hidden data-paprv-runtime-ready="true">PAPRV_RENDERER_READY:{startup.info.platform}:{startup.info.version}</output>
+      </>}
       {startup.status === 'error' && <p role="alert">시작 정보를 확인할 수 없습니다.</p>}
     </header>
     <section aria-labelledby="foundation-heading">

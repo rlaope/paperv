@@ -9,6 +9,10 @@ mod tests {
         assert_eq!(config["build"]["frontendDist"], "../dist");
         assert_eq!(config["build"]["devUrl"], "http://127.0.0.1:1420");
         assert!(config["app"]["windows"][0].get("url").is_none());
+        assert_eq!(config["app"]["windows"][0]["create"], false);
+        let main = include_str!("main.rs");
+        assert!(main.contains(".on_navigation(paprv::navigation::is_navigation_allowed)"));
+        assert!(main.contains("NewWindowResponse::Deny"));
         let csp = config["app"]["security"]["csp"].as_str().unwrap();
         assert!(csp.starts_with("default-src 'self'"));
         assert!(!csp.contains("https:"));

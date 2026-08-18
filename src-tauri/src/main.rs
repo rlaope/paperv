@@ -37,9 +37,24 @@ fn main() {
                 );
                 io::Error::other("database initialization rejected")
             })?;
+            let window_config = app
+                .config()
+                .app
+                .windows
+                .iter()
+                .find(|window| window.label == "main")
+                .cloned()
+                .ok_or_else(|| io::Error::other("main window configuration unavailable"))?;
+            tauri::WebviewWindowBuilder::from_config(app, &window_config)?
+                .on_navigation(paprv::navigation::is_navigation_allowed)
+                .on_new_window(|_, _| tauri::webview::NewWindowResponse::Deny)
+                .build()?;
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![paprv::system::system_get_info])
+        .invoke_handler(tauri::generate_handler![
+            paprv::system::system_get_info,
+            paprv::system::runtime_smoke_ready
+        ])
         .run(tauri::generate_context!())
         .expect("Paprv runtime failed");
 }
