@@ -1,0 +1,66 @@
+[
+  {
+    "id": "vaswani-2017-attention",
+    "title": "Attention Is All You Need",
+    "authors": [
+      "Ashish Vaswani",
+      "Noam Shazeer",
+      "Niki Parmar et al."
+    ],
+    "year": 2017,
+    "domain": "machine-learning",
+    "sourceUrl": "https://arxiv.org/abs/1706.03762",
+    "fixtureKind": "metadata-placeholder",
+    "rightsNote": "Metadata and source link only; no PDF is bundled."
+  },
+  {
+    "id": "lamport-1978-time",
+    "title": "Time, Clocks, and the Ordering of Events in a Distributed System",
+    "authors": [
+      "Leslie Lamport"
+    ],
+    "year": 1978,
+    "domain": "distributed-systems",
+    "sourceUrl": "https://doi.org/10.1145/359545.359563",
+    "fixtureKind": "metadata-placeholder",
+    "rightsNote": "Metadata and publisher DOI only; no article content is bundled."
+  },
+  {
+    "id": "shannon-1948-communication",
+    "title": "A Mathematical Theory of Communication",
+    "authors": [
+      "Claude E. Shannon"
+    ],
+    "year": 1948,
+    "domain": "information-theory",
+    "sourceUrl": "https://doi.org/10.1002/j.1538-7305.1948.tb01338.x",
+    "fixtureKind": "metadata-placeholder",
+    "rightsNote": "Metadata and publisher DOI only; no article content is bundled."
+  },
+  {
+    "id": "watson-crick-1953-dna",
+    "title": "Molecular Structure of Nucleic Acids: A Structure for Deoxyribose Nucleic Acid",
+    "authors": [
+      "James D. Watson",
+      "Francis H. C. Crick"
+    ],
+    "year": 1953,
+    "domain": "molecular-biology",
+    "sourceUrl": "https://doi.org/10.1038/171737a0",
+    "fixtureKind": "metadata-placeholder",
+    "rightsNote": "Metadata and publisher DOI only; no article content is bundled."
+  },
+  {
+    "id": "black-scholes-1973-options",
+    "title": "The Pricing of Options and Corporate Liabilities",
+    "authors": [
+      "Fischer Black",
+      "Myron Scholes"
+    ],
+    "year": 1973,
+    "domain": "financial-economics",
+    "sourceUrl": "https://doi.org/10.1086/260062",
+    "fixtureKind": "metadata-placeholder",
+    "rightsNote": "Metadata and publisher DOI only; no article content is bundled."
+  }
+]

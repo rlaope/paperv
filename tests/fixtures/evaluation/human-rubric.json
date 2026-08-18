@@ -1,0 +1,56 @@
+{
+  "version": 1,
+  "blind": true,
+  "scale": [
+    1,
+    5
+  ],
+  "instructions": "Hide system identity and output order. Two reviewers score independently before reconciliation.",
+  "dimensions": [
+    {
+      "id": "accuracy",
+      "description": "Claims preserve the source meaning and technical details.",
+      "anchors": {
+        "1": "Major factual errors",
+        "3": "Mostly correct with minor errors",
+        "5": "No identified factual or technical errors"
+      }
+    },
+    {
+      "id": "evidence",
+      "description": "Paper-specific claims are traceable to supplied page and quote evidence.",
+      "anchors": {
+        "1": "Claims lack usable evidence",
+        "3": "Most important claims are traceable",
+        "5": "Every paper-specific claim is precisely traceable"
+      }
+    },
+    {
+      "id": "flow",
+      "description": "The explanation forms a coherent learning sequence.",
+      "anchors": {
+        "1": "Fragmented or confusing",
+        "3": "Understandable with transitions missing",
+        "5": "Clear prerequisite-aware progression"
+      }
+    },
+    {
+      "id": "difficulty",
+      "description": "Difficulty matches an engineering or university learner without distortion.",
+      "anchors": {
+        "1": "Inaccessible or oversimplified",
+        "3": "Generally appropriate",
+        "5": "Accessible while preserving nuance"
+      }
+    },
+    {
+      "id": "professional-style",
+      "description": "Writing is concise, specific, and free of formulaic AI mannerisms.",
+      "anchors": {
+        "1": "Generic and repetitive",
+        "3": "Mostly professional",
+        "5": "Specific, natural, and publication-ready"
+      }
+    }
+  ]
+}
