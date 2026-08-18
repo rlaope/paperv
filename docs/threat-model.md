@@ -1,22 +1,18 @@
 # Paprv M0 threat model
 
-## Assets and trust boundaries
+## Trust boundary and assets
 
-Assets are local papers, notes, generated material, provider credentials, and usage metadata. Untrusted inputs will later include PDFs, URLs, arXiv metadata, Markdown, and provider output. The renderer is untrusted relative to the privileged main process; preload is a narrow validation boundary.
+Assets include future local papers and notes, provider credential references, and usage metadata. The React webview is untrusted relative to the Rust backend. M0 loads only bundled renderer assets in production and exposes one payload-free command.
 
-## Threats and M0 controls
+| Threat | Impact | M0 control | Evidence |
+| --- | --- | --- | --- |
+| Webview compromise reaches native APIs | File or credential theft | main-window capability has no permissions; no shell/http/fs/dialog/updater plugins | Rust config test and capability JSON |
+| Hostile remote navigation/content | Renderer replacement | production `frontendDist`, no remote window URL, strict self-only CSP, loopback-only development URL | Rust config test and Tauri build |
+| Malformed or unexpected command data | Privileged behavior | exactly one payload-free `system_get_info` handler; closed serialized response and strict Zod validation | Rust and renderer unit tests |
+| API key persistence | Credential disclosure | closed provider enum, canonical UUID-v4 reference type, matching SQLite constraints; raw key rejected | Rust storage tests |
+| Secret-bearing log text | Credential disclosure | fixed event/error/provider enums and bounded numeric context; no arbitrary message or error-string parameter | Rust logger test |
+| Migration corruption or drift | Data loss or unsafe assumptions | transactional up/down; canonical ledger/table DDL; unknown/gap/drift fail closed | Rust storage tests |
 
-| Threat | Impact | M0 control | Verification |
-|---|---|---|---|
-| Renderer compromise reaches Node | File or credential theft | `nodeIntegration=false`, context isolation, sandbox | `test:security` |
-| Navigation to hostile content | Renderer code replacement | same-origin initial navigation and main-frame redirect only; deny all new windows | `test:security` |
-| Malformed IPC | Privileged action with attacker-controlled shape | strict Zod request/response parsing and channel allowlist | unit tests |
-| API key leakage | Credential disclosure | emit only fixed log events with validated enum/scalar context; persist only database-constrained `keychain:paprv:<UUID>` references for a closed provider enum | `test:security` |
-| Database migration failure | Local data loss | transactional ordered up/down migrations; validate the migration list, applied prefix, and canonical ledger/application table schemas and DDL constraints | `test:integration` |
-| Copyrighted fixture redistribution | Legal risk | metadata and source-link placeholders only | `test:eval` |
+## M0 exclusions and residual risk
 
-## Deferred attack surface
-
-PDF parsing, URL acquisition, Markdown rendering, provider calls, OS credential-store integration, CSP hardening for viewer/editor dependencies, signing, notarization, and malicious-file fuzzing are excluded from M0 and must receive milestone-specific controls before activation.
-
-The only M0 IPC method, `system:get-info`, returns non-sensitive process metadata. Before adding any privileged or credential-bearing IPC, the main process must validate the sender frame URL against the owning window's trusted initial origin and reject missing, subframe, or mismatched senders in addition to validating payload contracts.
+PDF parsing/import, URL acquisition, Markdown rendering, provider calls, AI generation, OS credential-store integration, additional windows, and network plugins are intentionally absent. They require new commands, permissions, threat analysis, and tests. Local debug packaging does not establish code signing, notarization, sandbox entitlements, release distribution safety, or remote CI success. CSP allows the two Tauri IPC endpoints in `connect-src`; no general network origin is allowed.

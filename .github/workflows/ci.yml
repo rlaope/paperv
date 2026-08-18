@@ -11,13 +11,20 @@ jobs:
         with: { version: 11.21.0 }
       - uses: actions/setup-node@v4
         with: { node-version: 26, cache: pnpm }
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
       - run: pnpm install --frozen-lockfile
       - run: pnpm lint
       - run: pnpm typecheck
       - run: pnpm test
-      - run: pnpm test:integration
-      - run: pnpm test:security
       - run: pnpm test:a11y
       - run: pnpm test:eval
       - run: pnpm build
-      - run: pnpm test:smoke
+      - run: cargo fmt --manifest-path src-tauri/Cargo.toml --check
+      - run: cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets --all-features -- -D warnings
+      - run: cargo test --manifest-path src-tauri/Cargo.toml --all-features
+      - run: pnpm tauri build --debug

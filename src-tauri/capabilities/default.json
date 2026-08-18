@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "Paprv M0 main window with no plugin or core API permissions",
+  "windows": ["main"],
+  "permissions": []
+}

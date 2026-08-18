@@ -1,5 +1,5 @@
-# ADR 0003: Local storage
+# ADR 0003: Rust-owned SQLite storage
 
-- Status: Accepted for M0
-- Decision: Use SQLite through `sql.js` (WebAssembly) with ordered reversible migrations. Validate that migration definitions are a unique contiguous sequence from version 1 and that applied rows are an exact prefix with their required tables present. Persistence writes exported bytes atomically in the main process when introduced.
-- Consequences: M0 exercises real SQLite semantics without a native Node ABI module, reducing Electron packaging risk. Large-dataset performance and atomic file persistence remain later milestone validation items. API keys are never columns; only opaque app-namespaced OS credential-store references in `keychain:paprv:<UUID>` form may be persisted.
+- Status: Accepted; revised for Tauri by ADR 0006
+- Decision: Use `rusqlite` with bundled SQLite in the Rust backend. Migrations are ordered, transactional, reversible, and fail closed on an unknown version, a version gap, migration-ledger drift, application-table column/constraint drift, or a partially applied transaction. Validate canonical `schema_migrations` and `app_settings` DDL.
+- Consequences: The renderer has no database API. `ProviderId` is a closed Rust enum (`openai`, `anthropic`, `google`, `xai`, `ollama`). Only canonical `keychain:paprv:<UUID-v4>` references may be persisted; raw API keys are rejected by the Rust type boundary and SQLite constraints. OS credential-store integration remains outside M0.

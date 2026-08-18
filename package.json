@@ -1,44 +1,35 @@
 {
   "name": "paprv",
   "version": "0.0.1",
-  "main": "out/main/index.js",
   "private": true,
   "packageManager": "pnpm@11.21.0",
-  "engines": {
-    "node": ">=24"
-  },
+  "engines": { "node": ">=24" },
   "scripts": {
-    "dev": "electron-vite dev",
+    "dev": "tauri dev",
+    "dev:web": "vite",
+    "tauri": "tauri",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
     "test": "vitest run tests/unit",
-    "test:integration": "vitest run tests/integration",
-    "test:security": "vitest run tests/security",
     "test:a11y": "vitest run tests/a11y",
     "test:eval": "vitest run tests/evaluation/fixtures.test.ts",
-    "build": "electron-vite build",
-    "test:smoke": "node scripts/electron-smoke.mjs"
+    "build": "vite build"
   },
   "dependencies": {
-    "@paprv/contracts": "workspace:*",
-    "@paprv/storage": "workspace:*",
+    "@tauri-apps/api": "2.11.1",
     "react": "^19.1.1",
     "react-dom": "^19.1.1",
-    "sql.js": "^1.13.0",
     "zod": "^4.1.5"
   },
   "devDependencies": {
-    "@electron-toolkit/preload": "^3.0.2",
     "@eslint/js": "^9.34.0",
+    "@tauri-apps/cli": "2.11.4",
     "@types/node": "^24.3.0",
     "@types/react": "^19.1.12",
     "@types/react-dom": "^19.1.9",
-    "@types/sql.js": "^1.4.9",
     "@vitejs/plugin-react": "^5.0.2",
     "@vitest/coverage-v8": "^3.2.4",
     "axe-core": "^4.10.3",
-    "electron": "43.4.0",
-    "electron-vite": "^4.0.0",
     "eslint": "^9.34.0",
     "globals": "^16.3.0",
     "jsdom": "^26.1.0",

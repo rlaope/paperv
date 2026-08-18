@@ -1,0 +1,34 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Paprv",
+  "version": "0.0.1",
+  "identifier": "ai.sionic.paprv",
+  "build": {
+    "beforeDevCommand": "pnpm dev:web",
+    "devUrl": "http://127.0.0.1:1420",
+    "beforeBuildCommand": "pnpm build",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [{
+      "label": "main",
+      "title": "Paprv",
+      "width": 1100,
+      "height": 760,
+      "minWidth": 720,
+      "minHeight": 520,
+      "resizable": true,
+      "fullscreen": false
+    }],
+    "security": {
+      "capabilities": ["default"],
+      "csp": "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; font-src 'self'; connect-src ipc: http://ipc.localhost",
+      "freezePrototype": true
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["app"],
+    "macOS": { "minimumSystemVersion": "11.0" }
+  }
+}
