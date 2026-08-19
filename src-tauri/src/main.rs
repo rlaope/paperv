@@ -51,6 +51,7 @@ fn main() {
             database_path,
             arxiv_client,
         });
+        app.manage(paprv::generation::GenerationState::from_process_environment());
         let window_config = app
             .config()
             .app
@@ -59,10 +60,18 @@ fn main() {
             .find(|window| window.label == "main")
             .cloned()
             .ok_or_else(|| io::Error::other("main window configuration unavailable"))?;
-        tauri::WebviewWindowBuilder::from_config(app, &window_config)?
+        let window = tauri::WebviewWindowBuilder::from_config(app, &window_config)?
             .on_navigation(paprv::navigation::is_navigation_allowed)
             .on_new_window(|_, _| tauri::webview::NewWindowResponse::Deny)
             .build()?;
+        let app_handle = app.handle().clone();
+        window.on_window_event(move |event| {
+            if matches!(event, tauri::WindowEvent::Destroyed) {
+                app_handle
+                    .state::<paprv::generation::GenerationState>()
+                    .shutdown_and_wait();
+            }
+        });
         Ok(())
     });
 
@@ -73,7 +82,24 @@ fn main() {
         paprv::papers::import_arxiv_paper,
         paprv::papers::list_papers,
         paprv::papers::get_paper,
-        paprv::papers::save_paper_note,
+        paprv::documents::document_list,
+        paprv::documents::document_get,
+        paprv::documents::document_create,
+        paprv::documents::document_update,
+        paprv::documents::document_delete,
+        paprv::documents::document_get_properties,
+        paprv::documents::document_link_paper,
+        paprv::documents::document_unlink_paper,
+        paprv::documents::document_link_artifact,
+        paprv::documents::document_unlink_artifact,
+        paprv::study::study_get,
+        paprv::study::study_list_artifacts,
+        paprv::study::study_save_artifact,
+        paprv::study::study_delete_artifact,
+        paprv::generation::generation_get_readiness,
+        paprv::generation::generation_start,
+        paprv::generation::generation_get_run,
+        paprv::generation::generation_cancel,
     ]);
     #[cfg(not(debug_assertions))]
     let builder = builder.invoke_handler(tauri::generate_handler![
@@ -81,10 +107,50 @@ fn main() {
         paprv::papers::import_arxiv_paper,
         paprv::papers::list_papers,
         paprv::papers::get_paper,
-        paprv::papers::save_paper_note,
+        paprv::documents::document_list,
+        paprv::documents::document_get,
+        paprv::documents::document_create,
+        paprv::documents::document_update,
+        paprv::documents::document_delete,
+        paprv::documents::document_get_properties,
+        paprv::documents::document_link_paper,
+        paprv::documents::document_unlink_paper,
+        paprv::documents::document_link_artifact,
+        paprv::documents::document_unlink_artifact,
+        paprv::study::study_get,
+        paprv::study::study_list_artifacts,
+        paprv::study::study_save_artifact,
+        paprv::study::study_delete_artifact,
+        paprv::generation::generation_get_readiness,
+        paprv::generation::generation_start,
+        paprv::generation::generation_get_run,
+        paprv::generation::generation_cancel,
     ]);
 
-    builder
-        .run(tauri::generate_context!())
+    let app = builder
+        .build(tauri::generate_context!())
         .expect("Paprv runtime failed");
+    app.run(|app_handle, event| match event {
+        tauri::RunEvent::ExitRequested { api, .. } => {
+            let generation = app_handle.state::<paprv::generation::GenerationState>();
+            if !generation.is_closed() {
+                api.prevent_exit();
+                if let Some(window) = app_handle.get_webview_window("main") {
+                    if window.close().is_err() {
+                        stderr_event(
+                            LogEvent::NativeWindowCloseFailed,
+                            LogContext {
+                                error_code: Some(ErrorCode::WindowCloseRejected),
+                                ..LogContext::default()
+                            },
+                        );
+                    }
+                }
+            }
+        }
+        tauri::RunEvent::Exit => app_handle
+            .state::<paprv::generation::GenerationState>()
+            .shutdown_and_wait(),
+        _ => {}
+    });
 }

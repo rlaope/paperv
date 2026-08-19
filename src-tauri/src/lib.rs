@@ -1,7 +1,10 @@
 pub mod arxiv;
 mod config_security;
+pub mod documents;
+pub mod generation;
 pub mod logger;
 pub mod navigation;
 pub mod papers;
 pub mod storage;
+pub mod study;
 pub mod system;

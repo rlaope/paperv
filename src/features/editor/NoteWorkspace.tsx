@@ -1,272 +1,104 @@
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 'react'
-import ReactMarkdown from 'react-markdown'
-import remarkGfm from 'remark-gfm'
-import type { PaperDetail } from '../../api/papers'
-import { Icon, type IconName } from '../../ui/Icon'
-import type { EvidenceBacklink, WorkspacePapersApi } from '../workspace/types'
+import { DocumentsApiError, type MarkdownDocument } from '../../api/documents'
+import type { WorkspaceDocumentsApi } from '../workspace/types'
+import { Icon } from '../../ui/Icon'
 
-type SaveState = 'clean' | 'dirty' | 'saving' | 'saved' | 'error'
-type Mode = 'edit' | 'preview'
-type DraftMap = Record<string, string>
-type SaveMap = Record<string, SaveState>
+type SaveState = 'clean' | 'dirty' | 'saving' | 'saved' | 'error' | 'conflict'
+type Draft = { document: MarkdownDocument; title: string; markdown: string; baseRevision: number; saveState: SaveState; requestSequence: number; activeSave?: Promise<boolean> }
+export type DocumentWorkspaceHandle = {
+  openDocument: (id: string) => Promise<boolean>
+  flushDocument: (id: string) => Promise<boolean>
+  flushAllDirtyDocuments: () => Promise<string | null>
+  closeDocument: (id: string) => void
+  isComposing: () => boolean
+  selectionSnapshot: (id: string) => { startUtf8: number; endUtf8: number } | null
+  revision: (id: string) => number | null
+}
+type Props = { activeDocumentId: string | null; api: WorkspaceDocumentsApi; onDocumentLoaded?: (document: MarkdownDocument) => void; onDocumentSaved?: (document: MarkdownDocument) => void; onCopyCreated?: (document: MarkdownDocument) => void }
+const labels: Record<SaveState, string> = { clean: 'No changes', dirty: 'Unsaved changes', saving: 'Saving…', saved: 'Saved', error: 'Save failed', conflict: 'Revision conflict' }
 
-type Props = {
-  paper: PaperDetail | null
-  papersApi: WorkspacePapersApi
-  onImport: (trigger: HTMLElement) => void
-  onClosePaper: () => void
-  onEvidenceSelect?: (evidenceId: string) => void
-  onBacklinksChange?: (backlinks: EvidenceBacklink[]) => void
-}
-
-export type NoteWorkspaceHandle = {
-  flushActiveDraft: () => Promise<boolean>
-}
-
-const saveLabels: Record<SaveState, string> = {
-  clean: 'No changes', dirty: 'Unsaved', saving: 'Saving…', saved: 'Saved', error: 'Save failed'
-}
-const saveIcons: Record<SaveState, IconName> = {
-  clean: 'check', dirty: 'edit', saving: 'loader', saved: 'check', error: 'alert'
-}
-const evidenceLabels: Record<EvidenceBacklink['evidenceId'], string> = {
-  'evidence-abstract': 'Abstract',
-  'evidence-categories': 'Categories',
-  'evidence-metadata': 'Source details'
-}
-
-function extractBacklinks(markdown: string): EvidenceBacklink[] {
-  const backlinks: EvidenceBacklink[] = []
-  for (const line of markdown.split(/\r?\n/u)) {
-    const pattern = /\[([^\]]+)\]\(#(evidence-(?:abstract|categories|metadata))\)/gu
-    let match: RegExpExecArray | null
-    while ((match = pattern.exec(line)) !== null) {
-      const evidenceId = match[2] as EvidenceBacklink['evidenceId']
-      const plainLine = line
-        .replace(/\[([^\]]+)\]\([^)]+\)/gu, '$1')
-        .replace(/^[#>*`\s-]+/u, '')
-        .trim()
-      backlinks.push({
-        evidenceId,
-        label: evidenceLabels[evidenceId],
-        snippet: plainLine.length > 120 ? `${plainLine.slice(0, 117)}…` : plainLine
-      })
-    }
-  }
-  return backlinks
-}
-
-export const NoteWorkspace = forwardRef<NoteWorkspaceHandle, Props>(function NoteWorkspace({
-  onBacklinksChange, onClosePaper, onEvidenceSelect, onImport, paper, papersApi
-}, ref): React.JSX.Element {
-  const [drafts, setDrafts] = useState<DraftMap>({})
-  const [saveStates, setSaveStates] = useState<SaveMap>({})
-  const [mode, setMode] = useState<Mode>('edit')
-  const [manualAnnouncement, setManualAnnouncement] = useState('')
-  const [composing, setComposing] = useState(false)
+export const DocumentWorkspace = forwardRef<DocumentWorkspaceHandle, Props>(function DocumentWorkspace({ activeDocumentId, api, onCopyCreated, onDocumentLoaded, onDocumentSaved }, ref) {
+  const [, render] = useState(0)
+  const drafts = useRef(new Map<string, Draft>())
+  const timers = useRef(new Map<string, number>())
+  const composing = useRef(false)
   const editorRef = useRef<HTMLTextAreaElement>(null)
-  const latestDrafts = useRef<DraftMap>({})
-  const latestSaveStates = useRef<SaveMap>({})
-  const requestIds = useRef<Record<string, number>>({})
-  const activeSaves = useRef<Record<string, Promise<boolean> | undefined>>({})
-  const composingRef = useRef(false)
+  const announce = useRef('')
+  const refresh = () => render((value) => value + 1)
 
-  const paperId = paper?.arxivId ?? null
-  const initialMarkdown = paper?.note?.markdown ?? ''
-  const draft = paper ? (drafts[paper.arxivId] ?? initialMarkdown) : ''
-  const saveState = paperId ? (saveStates[paperId] ?? 'clean') : 'clean'
-  const wordCount = draft.trim() ? draft.trim().split(/\s+/u).length : 0
-
-  if (paperId && latestDrafts.current[paperId] === undefined) {
-    latestDrafts.current[paperId] = initialMarkdown
+  const openDocument = async (id: string): Promise<boolean> => {
+    if (drafts.current.has(id)) return true
+    try { const document = await api.get(id); drafts.current.set(id, { document, title: document.title, markdown: document.markdown, baseRevision: document.revision, saveState: 'clean', requestSequence: 0 }); onDocumentLoaded?.(document); refresh(); return true } catch { announce.current = 'Document could not be opened'; refresh(); return false }
   }
-
-  const updateSaveState = (id: string, state: SaveState): void => {
-    latestSaveStates.current[id] = state
-    setSaveStates((states) => ({ ...states, [id]: state }))
+  const save = async (id: string): Promise<boolean> => {
+    const record = drafts.current.get(id); if (!record || composing.current) return false
+    if (record.activeSave) await record.activeSave
+    const current = drafts.current.get(id); if (!current) return false
+    if (current.saveState === 'clean' || current.saveState === 'saved') return true
+    const markdown = current.markdown; const title = current.title; const expectedRevision = current.baseRevision; const sequence = current.requestSequence + 1
+    current.requestSequence = sequence; current.saveState = 'saving'; refresh()
+    const operation = api.update({ documentId: id, expectedRevision, title, markdown }).then((saved) => {
+      const latest = drafts.current.get(id); if (!latest) return false
+      latest.document = saved; latest.baseRevision = saved.revision; onDocumentSaved?.(saved)
+      if (latest.requestSequence !== sequence) { latest.saveState = 'dirty'; refresh(); return false }
+      latest.saveState = latest.markdown === markdown && latest.title === title ? 'saved' : 'dirty'; announce.current = latest.saveState === 'saved' ? 'Saved' : 'Newer changes remain unsaved'; refresh(); return latest.saveState === 'saved'
+    }, (error) => {
+      const latest = drafts.current.get(id); if (!latest || latest.requestSequence !== sequence) return false
+      if (latest.markdown !== markdown || latest.title !== title) latest.saveState = 'dirty'
+      else latest.saveState = error instanceof DocumentsApiError && error.code === 'document_conflict' ? 'conflict' : 'error'
+      announce.current = labels[latest.saveState]; refresh(); return false
+    })
+    current.activeSave = operation
+    const result = await operation
+    if (drafts.current.get(id)?.activeSave === operation) delete drafts.current.get(id)!.activeSave
+    return result
   }
-
-  const updateDraft = (next: string): void => {
-    if (!paperId) return
-    latestDrafts.current[paperId] = next
-    setDrafts((items) => ({ ...items, [paperId]: next }))
-    updateSaveState(paperId, 'dirty')
-  }
-
-  const save = async (manual: boolean): Promise<boolean> => {
-    if (!paperId) return true
-    const id = paperId
-    const submittedDraft = latestDrafts.current[id] ?? draft
-    const currentRequest = (requestIds.current[id] ?? 0) + 1
-    requestIds.current[id] = currentRequest
-    updateSaveState(id, 'saving')
-    if (manual) setManualAnnouncement('Saving…')
-    const operation = (async (): Promise<boolean> => {
-      try {
-        await papersApi.savePaperNote(id, submittedDraft)
-        if (requestIds.current[id] !== currentRequest) return false
-        const currentDraft = latestDrafts.current[id] ?? submittedDraft
-        const nextState = currentDraft === submittedDraft ? 'saved' : 'dirty'
-        updateSaveState(id, nextState)
-        if (manual) setManualAnnouncement(nextState === 'saved' ? 'Saved' : 'Newer changes remain unsaved')
-        return nextState === 'saved'
-      } catch {
-        if (requestIds.current[id] !== currentRequest) return false
-        const currentDraft = latestDrafts.current[id] ?? submittedDraft
-        if (currentDraft !== submittedDraft) {
-          updateSaveState(id, 'dirty')
-          if (manual) setManualAnnouncement('Newer changes remain unsaved')
-          return false
-        }
-        updateSaveState(id, 'error')
-        if (manual) setManualAnnouncement('Save failed')
-        return false
-      }
-    })()
-    activeSaves.current[id] = operation
-    const saved = await operation
-    if (activeSaves.current[id] === operation) delete activeSaves.current[id]
-    return saved
-  }
-
-  useImperativeHandle(ref, () => ({
-    flushActiveDraft: async () => {
-      if (!paperId) return true
-      if (composingRef.current) return false
-      const id = paperId
-      while (true) {
-        const active = activeSaves.current[id]
-        if (active) await active
-        const state = latestSaveStates.current[id] ?? 'clean'
-        if (state === 'clean' || state === 'saved') return true
-        if (state === 'error') return false
-        if (state === 'dirty') {
-          if (await save(false)) return true
-          if ((latestSaveStates.current[id] ?? 'clean') === 'error') return false
-          continue
-        }
-        return false
-      }
+  const flushDocument = async (id: string): Promise<boolean> => {
+    if (composing.current) { announce.current = 'Finish text composition before continuing'; refresh(); return false }
+    const timer = timers.current.get(id); if (timer) { window.clearTimeout(timer); timers.current.delete(id) }
+    while (true) {
+      const record = drafts.current.get(id); if (!record) return true
+      if (record.activeSave) { await record.activeSave; continue }
+      if (record.saveState === 'clean' || record.saveState === 'saved') return true
+      if (record.saveState === 'error' || record.saveState === 'conflict') return false
+      return save(id)
     }
-  }))
-
-  useEffect(() => {
-    if (!paperId || saveState !== 'dirty' || composing) return
-    const timer = window.setTimeout(() => { void save(false) }, 600)
-    return () => window.clearTimeout(timer)
-  // save reads the current paper and draft; restarting this timer on either is intentional.
-  }, [composing, draft, paperId, saveState])
-
-  useEffect(() => {
-    onBacklinksChange?.(paper ? extractBacklinks(draft) : [])
-  // The parent callback is stable; extraction follows only the active note.
-  }, [draft, paperId])
-
-  useEffect(() => {
-    if (!paperId) setMode('edit')
-  }, [paperId])
-
-  useEffect(() => {
-    if (!paperId) return
-    const onShortcut = (event: KeyboardEvent): void => {
-      if ((event.metaKey || event.ctrlKey) && event.shiftKey && event.key.toLocaleLowerCase() === 'p') {
-        event.preventDefault()
-        setMode((current) => current === 'edit' ? 'preview' : 'edit')
-      }
-    }
-    document.addEventListener('keydown', onShortcut)
-    return () => document.removeEventListener('keydown', onShortcut)
-  }, [paperId])
-
-  const wrapSelection = (before: string, after = before, placeholder = 'text'): void => {
-    const editor = editorRef.current
-    if (!editor || !paperId) return
-    const start = editor.selectionStart
-    const end = editor.selectionEnd
-    const selected = draft.slice(start, end) || placeholder
-    const next = `${draft.slice(0, start)}${before}${selected}${after}${draft.slice(end)}`
-    updateDraft(next)
-    window.setTimeout(() => {
-      editor.focus()
-      editor.setSelectionRange(start + before.length, start + before.length + selected.length)
-    }, 0)
   }
+  const flushAllDirtyDocuments = async (): Promise<string | null> => { for (const id of drafts.current.keys()) if (!(await flushDocument(id))) return id; return null }
+  const closeDocument = (id: string) => { const timer=timers.current.get(id);if(timer)window.clearTimeout(timer);timers.current.delete(id);drafts.current.delete(id);refresh() }
+  useImperativeHandle(ref, () => ({ openDocument, flushDocument, flushAllDirtyDocuments, closeDocument, isComposing: () => composing.current, selectionSnapshot: (id) => {
+    if (id !== activeDocumentId || !editorRef.current) return null
+    const record = drafts.current.get(id); if (!record) return null
+    const start = editorRef.current.selectionStart; const end = editorRef.current.selectionEnd
+    if (start === end) return null
+    return { startUtf8: new TextEncoder().encode(record.markdown.slice(0, start)).byteLength, endUtf8: new TextEncoder().encode(record.markdown.slice(0, end)).byteLength }
+  }, revision: (id) => drafts.current.get(id)?.baseRevision ?? null }))
 
-  return <>
-    <div className="editor-modebar" aria-label="Editor mode">
-      <div className="document-tabs" role="tablist" aria-label="Open document">
-        <div className="active-document-tab" role="tab" aria-selected="true" title={paper?.title ?? 'Welcome'}>
-          <Icon name={paper ? 'file' : 'library'} size={15} />
-          <span>{paper?.title ?? 'Welcome'}</span>
-          {paper && saveState === 'dirty' && <span className="dirty-dot" aria-label="Unsaved changes" />}
-          {paper && <button type="button" className="tab-close" aria-label="Close paper" title="Close paper" onClick={onClosePaper}>
-            <Icon name="x" size={14} />
-          </button>}
-        </div>
-      </div>
-      {paper && mode === 'edit' && <div className="editor-toolbar" aria-label="Markdown formatting">
-        <button type="button" aria-label="Bold" title="Bold" onClick={() => wrapSelection('**')}><Icon name="bold" size={16} /></button>
-        <button type="button" aria-label="Link" title="Link" onClick={() => wrapSelection('[', '](https://)', 'link text')}><Icon name="link" size={16} /></button>
-        <button type="button" aria-label="Inline code" title="Inline code" onClick={() => wrapSelection('`')}><Icon name="code" size={16} /></button>
-      </div>}
-      <div className="mode-toggle">
-        <button type="button" aria-pressed={mode === 'edit'} disabled={!paper} onClick={() => setMode('edit')}>
-          <Icon name="edit" size={15} /><span>Edit</span>
-        </button>
-        <button type="button" aria-pressed={mode === 'preview'} disabled={!paper} onClick={() => setMode('preview')}>
-          <Icon name="eye" size={15} /><span>Preview</span>
-        </button>
-      </div>
-    </div>
-
-    <div className="editor-body">
-      {!paper ? <div className="editor-empty">
-        <Icon name="file-plus" size={24} />
-        <h2>Select a paper to begin a note</h2>
-        <p>Choose a paper from the Explorer or fetch one from arXiv.</p>
-        <button type="button" onClick={(event) => onImport(event.currentTarget)}><Icon name="file-plus" size={16} />Fetch from arXiv</button>
-      </div> : mode === 'edit' ? <textarea
-        ref={editorRef}
-        className="markdown-editor"
-        aria-label="Markdown paper note editor"
-        spellCheck="false"
-        value={draft}
-        onChange={(event) => updateDraft(event.target.value)}
-        onCompositionStart={() => { composingRef.current = true; setComposing(true) }}
-        onCompositionEnd={() => { composingRef.current = false; setComposing(false) }}
-        onKeyDown={(event) => {
-          if ((event.metaKey || event.ctrlKey) && event.key.toLocaleLowerCase() === 's') {
-            event.preventDefault()
-            void save(true)
-          }
-        }}
-      /> : <article className="markdown-preview">
-        <ReactMarkdown
-          remarkPlugins={[remarkGfm]}
-          components={{
-            a: ({ children, href }) => {
-              if (href?.startsWith('#evidence-')) {
-                return <button type="button" className="evidence-link" onClick={() => onEvidenceSelect?.(href.slice(1))}>{children}</button>
-              }
-              return <span className="external-link-inert" data-external-link="true" title="External navigation is disabled for safety.">
-                {children}<Icon name="external-link" size={13} />
-              </span>
-            }
-          }}
-        >{draft}</ReactMarkdown>
-      </article>}
-    </div>
-
-    <footer className="editor-statusbar" role={saveState === 'error' ? 'alert' : undefined} aria-label="Editor status">
-      <span className={`save-state is-${saveState}`} data-save-status={paper ? saveState : 'none'}>
-        {paper ? <><Icon name={saveIcons[saveState]} className={saveState === 'saving' ? 'is-spinning' : undefined} size={13} />{saveLabels[saveState]}</> : 'No paper selected'}
-      </span>
-      {saveState === 'error' && <button type="button" onClick={() => { void save(true) }}><Icon name="refresh" size={13} />Retry save</button>}
-      <span className="statusbar-detail">Markdown</span>
-      <span className="statusbar-detail">{wordCount} {wordCount === 1 ? 'word' : 'words'}</span>
-      <span className="statusbar-detail">{mode === 'edit' ? 'Edit' : 'Preview'}</span>
-      <span className="statusbar-detail"><Icon name="command" size={12} />Cmd/Ctrl+S</span>
-      <span className="visually-hidden" role="status">{manualAnnouncement}</span>
-    </footer>
-  </>
+  useEffect(() => { if (activeDocumentId) void openDocument(activeDocumentId) }, [activeDocumentId])
+  useEffect(() => () => { for (const timer of timers.current.values()) window.clearTimeout(timer) }, [])
+  const update = (field: 'title' | 'markdown', value: string) => {
+    if (!activeDocumentId) return; const record = drafts.current.get(activeDocumentId); if (!record) return
+    record[field] = value; record.saveState = 'dirty'; record.requestSequence += 1; refresh()
+    const old = timers.current.get(activeDocumentId); if (old) window.clearTimeout(old)
+    if (!composing.current) timers.current.set(activeDocumentId, window.setTimeout(() => { timers.current.delete(activeDocumentId); void save(activeDocumentId) }, 600))
+  }
+  const retry = () => { if (!activeDocumentId) return; const record = drafts.current.get(activeDocumentId); if (!record) return; record.saveState = 'dirty'; refresh(); void save(activeDocumentId) }
+  const reloadAsCopy = async () => { if (!activeDocumentId) return; const record = drafts.current.get(activeDocumentId); if (!record) return; try { const copy = await api.create({ title: `${record.title} (conflicted copy)`, markdown: record.markdown }); onCopyCreated?.(copy) } catch { announce.current = 'Copy could not be created'; refresh() } }
+  const formatSelection = (before: string, after: string, fallback: string) => {
+    if (!activeDocumentId || !editorRef.current) return
+    const record = drafts.current.get(activeDocumentId); if (!record) return
+    const start = editorRef.current.selectionStart; const end = editorRef.current.selectionEnd
+    const selected = record.markdown.slice(start, end) || fallback
+    update('markdown', `${record.markdown.slice(0, start)}${before}${selected}${after}${record.markdown.slice(end)}`)
+    window.setTimeout(() => { editorRef.current?.focus(); editorRef.current?.setSelectionRange(start + before.length, start + before.length + selected.length) }, 0)
+  }
+  const record = activeDocumentId ? drafts.current.get(activeDocumentId) : undefined
+  return <section className="document-workspace" aria-label="Markdown document">
+    {!record ? <div className="editor-empty"><Icon name="file" /><h2>Open a Vault document</h2><p>Your Markdown documents are independent from papers.</p></div> : <>
+      <div className="editor-context" aria-label={`Vault / ${record.title}.md`}><span>Vault</span><span aria-hidden="true">/</span><input className="document-name-input" aria-label="Document title" value={record.title} onChange={(event) => update('title', event.target.value)} /><span aria-hidden="true">.md</span></div>
+      <div className="editor-body"><textarea ref={editorRef} className="markdown-editor" aria-label="Markdown document editor" placeholder="Start writing in Markdown…" spellCheck="false" value={record.markdown} onChange={(event) => update('markdown', event.target.value)} onCompositionStart={() => { composing.current = true }} onCompositionEnd={() => { composing.current = false; update('markdown', editorRef.current?.value ?? record.markdown) }} onKeyDown={(event) => { if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 's') { event.preventDefault(); if (!composing.current) void save(activeDocumentId!) } else if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'b') { event.preventDefault(); formatSelection('**','**','bold text') } }} /></div>
+      {(record.saveState === 'error' || record.saveState === 'conflict') && <div className="document-recovery editor-statusbar" role="alert"><span>{labels[record.saveState]}</span><button type="button" onClick={retry}>Retry</button>{record.saveState === 'conflict' && <button type="button" onClick={() => { void reloadAsCopy() }}>Reload as copy</button>}</div>}
+      <span className="visually-hidden" role="status" aria-live="polite">{announce.current}</span>
+    </>}
+  </section>
 })

@@ -10,6 +10,7 @@ pub enum LogEvent {
     ArxivMetadataRejected,
     ArxivPaperImported,
     PaperNoteSaved,
+    NativeWindowCloseFailed,
 }
 
 #[derive(Debug, Clone, Copy, Serialize)]
@@ -20,6 +21,7 @@ pub enum ErrorCode {
     MigrationRejected,
     ProviderUnavailable,
     ArxivUnavailable,
+    WindowCloseRejected,
 }
 
 #[derive(Debug, Clone, Copy, Serialize)]
@@ -81,6 +83,24 @@ mod tests {
             String::from_utf8(output).unwrap(),
             r#"{"event":"provider_request_failed","context":{"error_code":"provider_unavailable","provider":"openai","attempt":2}}
 "#
+        );
+    }
+
+    #[test]
+    fn native_window_close_failure_is_an_allowlisted_privacy_safe_event() {
+        let mut output = Vec::new();
+        write_event(
+            &mut output,
+            LogEvent::NativeWindowCloseFailed,
+            LogContext {
+                error_code: Some(ErrorCode::WindowCloseRejected),
+                ..LogContext::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(
+            String::from_utf8(output).unwrap(),
+            "{\"event\":\"native_window_close_failed\",\"context\":{\"error_code\":\"window_close_rejected\"}}\n"
         );
     }
 

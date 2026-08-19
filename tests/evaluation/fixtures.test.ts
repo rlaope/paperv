@@ -2,6 +2,8 @@ import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { z } from 'zod'
+import { generationErrorCodeSchema } from '../../src/api/generation'
+import { generationErrorCopy } from '../../src/features/transform/TransformDialog'
 
 const paper = z.object({
   id: z.string().min(1), title: z.string().min(1), authors: z.array(z.string()).min(1),
@@ -20,5 +22,15 @@ describe('evaluation corpus contract', () => {
   it('provides an anchored blind human evaluation rubric', () => {
     const data = JSON.parse(readFileSync(resolve('tests/fixtures/evaluation/human-rubric.json'), 'utf8')) as unknown
     expect(rubric.parse(data).blind).toBe(true)
+  })
+
+  it('keeps every closed transform failure family bounded and actionable', () => {
+    for (const code of generationErrorCodeSchema.options) {
+      const copy = generationErrorCopy(code)
+      expect(copy.length, code).toBeGreaterThan(10)
+      expect(copy.length, code).toBeLessThanOrEqual(120)
+      expect(copy, code).not.toContain(code)
+      expect(copy, code).not.toMatch(/stderr|stdout|\/tmp|stack trace/iu)
+    }
   })
 })

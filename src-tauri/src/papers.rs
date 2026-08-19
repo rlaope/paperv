@@ -18,20 +18,6 @@ pub struct ImportArxivPaperInput {
     pub reference: String,
 }
 
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct SavePaperNoteInput {
-    pub arxiv_id: String,
-    pub markdown: String,
-}
-
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct PaperNote {
-    pub markdown: String,
-    pub updated_at: String,
-}
-
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PaperListItem {
@@ -58,7 +44,6 @@ pub struct PaperDetail {
     pub source_updated_at: String,
     pub imported_at: String,
     pub metadata_fetched_at: String,
-    pub note: Option<PaperNote>,
 }
 
 #[derive(Debug, Serialize)]
@@ -68,7 +53,7 @@ pub enum CommandError {
     PaperNotFound,
     ArxivMetadataUnavailable,
     ArxivMetadataInvalid,
-    NoteTooLarge,
+
     StorageUnavailable,
 }
 
@@ -86,10 +71,6 @@ fn paper_detail(paper: storage::StoredPaper) -> PaperDetail {
         source_updated_at: metadata.source_updated_at,
         imported_at: paper.imported_at,
         metadata_fetched_at: paper.metadata_fetched_at,
-        note: paper.note.map(|note| PaperNote {
-            markdown: note.markdown,
-            updated_at: note.updated_at,
-        }),
     }
 }
 
@@ -119,10 +100,6 @@ fn arxiv_error(error: ArxivApiError) -> CommandError {
     }
 }
 
-fn note_within_limit(markdown: &str) -> bool {
-    markdown.len() <= 262_144
-}
-
 async fn run_blocking<T, F>(task: F) -> Result<T, CommandError>
 where
     T: Send + 'static,
@@ -144,10 +121,14 @@ pub async fn import_arxiv_paper(
     let fetch_id = id.clone();
     let metadata =
         run_blocking(move || client.fetch_metadata(&fetch_id).map_err(arxiv_error)).await?;
-    let mut connection = storage::open_connection(&state.database_path)
-        .map_err(|_| CommandError::StorageUnavailable)?;
-    storage::upsert_paper(&mut connection, &metadata).map_err(storage_error)?;
-    let paper = storage::get_paper(&connection, id.base_id()).map_err(storage_error)?;
+    let database_path = state.database_path.clone();
+    let paper = run_blocking(move || {
+        let mut connection = storage::open_connection(&database_path)
+            .map_err(|_| CommandError::StorageUnavailable)?;
+        storage::upsert_paper(&mut connection, &metadata).map_err(storage_error)?;
+        storage::get_paper(&connection, id.base_id()).map_err(storage_error)
+    })
+    .await?;
     stderr_event(LogEvent::ArxivPaperImported, LogContext::default());
     Ok(paper_detail(paper))
 }
@@ -185,27 +166,6 @@ pub fn get_paper(
         .map_err(storage_error)
 }
 
-#[tauri::command]
-pub fn save_paper_note(
-    input: SavePaperNoteInput,
-    state: State<'_, AppState>,
-) -> Result<PaperNote, CommandError> {
-    if !note_within_limit(&input.markdown) {
-        return Err(CommandError::NoteTooLarge);
-    }
-    let id = ArxivId::parse_canonical_base(&input.arxiv_id)
-        .map_err(|_| CommandError::InvalidArxivReference)?;
-    let mut connection = storage::open_connection(&state.database_path)
-        .map_err(|_| CommandError::StorageUnavailable)?;
-    let note = storage::save_note(&mut connection, id.base_id(), &input.markdown)
-        .map_err(storage_error)?;
-    stderr_event(LogEvent::PaperNoteSaved, LogContext::default());
-    Ok(PaperNote {
-        markdown: note.markdown,
-        updated_at: note.updated_at,
-    })
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -225,7 +185,6 @@ mod tests {
             },
             imported_at: "2026-08-18T00:00:00Z".into(),
             metadata_fetched_at: "2026-08-18T00:00:00Z".into(),
-            note: None,
         });
         assert_eq!(detail.primary_category.as_deref(), Some("cs.CL"));
         assert_eq!(
@@ -248,12 +207,6 @@ mod tests {
             release_tx.send(()).unwrap();
             assert_eq!(blocking.await.unwrap().unwrap(), 42);
         });
-    }
-
-    #[test]
-    fn note_limit_counts_utf8_bytes() {
-        assert!(note_within_limit(&"가".repeat(87_381)));
-        assert!(!note_within_limit(&"가".repeat(87_382)));
     }
 
     #[test]

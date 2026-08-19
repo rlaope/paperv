@@ -1,5 +1,9 @@
 # 논문 학습 데스크톱 앱 — 명확화된 제품 브리프
 
+> **Status: Historical product vision, not the implemented release contract.** This document preserves the long-term discovery brief. Features such as PDF import/viewing, paper Q&A, related-paper discovery, knowledge profiling, and learning roadmaps are aspirational unless the current README and accepted ADRs explicitly say otherwise. The canonical implemented architecture is [ADR 0009](adr/0009-study-and-vault.md), with current release boundaries in the [README](../README.md).
+
+> **Implemented interaction clarification:** The current Study experience is a dense Claude-like natural-request composer, not the task/source/output-language form imagined during discovery. A compact Agent control exposes generation-capable Claude Code and disabled discovery-only Codex CLI; a compact Context control chooses the stored abstract, a saved document, or an exact captured selection. One request selects exactly one closed study skill and English or Korean. It cannot dispatch arbitrary tools or shell work, and its text is ephemeral rather than stored. The current Vault is editor-first: a native textarea and inline breadcrumb/name input, with no document Edit/Preview mode or always-visible formatting/status/revision/word-count chrome. These implemented constraints supersede contrary details below while preserving this brief as historical context.
+
 ## 목표
 
 공부하는 엔지니어와 대학생이 PDF 파일이나 arXiv URL로 논문을 가져오면, 사용자의 요청과 현재 지식 수준에 맞춰 다음 작업을 하나의 데스크톱 앱에서 수행할 수 있게 한다.
